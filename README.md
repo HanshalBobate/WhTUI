@@ -25,37 +25,76 @@ WhatsApp Web
 
 ---
 
-## Quick Start (Windows)
+## Installation
 
-A launcher script is included. Run it once to install dependencies and launch:
+Run the appropriate command block below to clone the repository, install all dependencies (including the Playwright browser), and securely install `whtui` as a global command on your system.
 
-```bat
-whtui.bat
+### Linux / macOS / WSL (Bash & Zsh)
+
+Paste this block into your terminal:
+
+```bash
+# Clean up any old installations
+npm uninstall -g whtui
+
+# Clone and install dependencies
+git clone https://github.com/HanshalBobate/WhTUI.git
+cd WhTUI
+npm install --silent
+npm run install:browser --silent
+
+# Install globally
+npm install -g --force .
+
+# Add npm global bin to your current PATH
+export PATH="$(npm config get prefix)/bin:$PATH"
+
+# Add it permanently to your shell profile
+grep -qxF 'export PATH="$(npm config get prefix)/bin:$PATH"' ~/.bashrc || echo 'export PATH="$(npm config get prefix)/bin:$PATH"' >> ~/.bashrc
+grep -qxF 'export PATH="$(npm config get prefix)/bin:$PATH"' ~/.zshrc || echo 'export PATH="$(npm config get prefix)/bin:$PATH"' >> ~/.zshrc 2>/dev/null
+
+hash -r
 ```
 
-Or, to run `whtui` from **any directory** (like `nvim`), add the project folder to your PATH:
+### Windows (PowerShell)
 
-1. Open **System Properties → Advanced → Environment Variables**
-2. Under **User variables**, edit `Path`
-3. Add `d:\PROJECTS\whtui` (or wherever you cloned it)
-4. Open a new terminal and type `whtui`
+Paste this block into Windows PowerShell:
+
+```powershell
+# Clean up any old installations
+npm uninstall -g whtui
+
+# Clone and install dependencies
+git clone https://github.com/HanshalBobate/WhTUI.git
+cd WhTUI
+npm install --silent
+npm run install:browser --silent
+
+# Install globally
+npm install -g --force .
+
+# Add npm global bin permanently to your Windows User PATH
+$NpmBin = (npm config get prefix)
+$CurrentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($CurrentPath -notlike "*$NpmBin*") {
+    [Environment]::SetEnvironmentVariable("Path", "$CurrentPath;$NpmBin", "User")
+}
+$env:PATH = "$NpmBin;" + $env:PATH
+```
 
 ---
 
-## Manual Setup
+## First Launch
+
+Once installed, simply type the following from **any directory**:
 
 ```bash
-# 1. Install Node dependencies
-npm install
-
-# 2. Download the Playwright Chromium browser (first time only)
-npm run install:browser
-
-# 3. Start whtui
-npm start
+whtui
 ```
 
-On first launch you will see a QR code:
+*(Note: If you are using WSL but installed this via Windows, run `whtui.cmd` instead).*
+
+On your first launch, a QR code will appear in the terminal:
 
 ```
 Open WhatsApp on your phone
@@ -63,8 +102,7 @@ Tap Menu ⋮ → Linked Devices → Link a Device
 Scan the QR code
 ```
 
-After scanning once, the session is stored in `storage/browser-profile/` and
-**you will never need to scan again** — even after reboots.
+After scanning once, the session is securely stored in `storage/browser-profile/` and **you will never need to scan again** — even after reboots.
 
 ---
 
