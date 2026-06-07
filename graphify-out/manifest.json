@@ -1,0 +1,217 @@
+{
+  "D:\\PROJECTS\\whtui\\debug-dom.js": {
+    "mtime": 1780760129.264246,
+    "ast_hash": "d7f47ca4c4bf1dc860ff3970e0f31f7c",
+    "semantic_hash": "d7f47ca4c4bf1dc860ff3970e0f31f7c"
+  },
+  "D:\\PROJECTS\\whtui\\index.js": {
+    "mtime": 1780754253.4623096,
+    "ast_hash": "6522516c3eb8cdad86fc75295ede2c40",
+    "semantic_hash": "6522516c3eb8cdad86fc75295ede2c40"
+  },
+  "D:\\PROJECTS\\whtui\\package.json": {
+    "mtime": 1780820361.0290787,
+    "ast_hash": "b7b55dbe1cb1d1e20cb26ba428264020",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\core\\cache.js": {
+    "mtime": 1780750858.6248071,
+    "ast_hash": "6b1d39258a94cd9ccf6f4bf7613af227",
+    "semantic_hash": "6b1d39258a94cd9ccf6f4bf7613af227"
+  },
+  "D:\\PROJECTS\\whtui\\core\\events.js": {
+    "mtime": 1780750560.1601148,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "D:\\PROJECTS\\whtui\\core\\state.js": {
+    "mtime": 1780751134.3443239,
+    "ast_hash": "5f8ae4ffdeb0046c0abc9a50b1d67e87",
+    "semantic_hash": "5f8ae4ffdeb0046c0abc9a50b1d67e87"
+  },
+  "D:\\PROJECTS\\whtui\\core\\whatsapp.js": {
+    "mtime": 1780753146.0097315,
+    "ast_hash": "5b52dcbf520cbcdd12f2c21c1e688a65",
+    "semantic_hash": "5b52dcbf520cbcdd12f2c21c1e688a65"
+  },
+  "D:\\PROJECTS\\whtui\\src\\main.js": {
+    "mtime": 1780820361.0301225,
+    "ast_hash": "c57c41b05fb67c99ed5f0fe501fe15eb",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\src\\browser\\browser.js": {
+    "mtime": 1780753743.5124476,
+    "ast_hash": "5ce99d19a56b6f3d20e01c651b406ecd",
+    "semantic_hash": "5ce99d19a56b6f3d20e01c651b406ecd"
+  },
+  "D:\\PROJECTS\\whtui\\src\\browser\\dom.js": {
+    "mtime": 1780755839.9930599,
+    "ast_hash": "ae579c4da36f96de4f4058bc43fd2fbd",
+    "semantic_hash": "ae579c4da36f96de4f4058bc43fd2fbd"
+  },
+  "D:\\PROJECTS\\whtui\\src\\browser\\observer.js": {
+    "mtime": 1780820347.851568,
+    "ast_hash": "ed0679ee458d11aef257fbac0d981e11",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\src\\browser\\qr.js": {
+    "mtime": 1780755838.849409,
+    "ast_hash": "bba0671b7bca4af8df8fb2d84cad4459",
+    "semantic_hash": "bba0671b7bca4af8df8fb2d84cad4459"
+  },
+  "D:\\PROJECTS\\whtui\\src\\browser\\scraper.js": {
+    "mtime": 1780820361.0296078,
+    "ast_hash": "6bc949f2292f8bdf1ce0c2d09de42a2e",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\src\\browser\\selectors.js": {
+    "mtime": 1780760501.0600283,
+    "ast_hash": "90a1821f24a8a9595a9722795315c3a9",
+    "semantic_hash": "90a1821f24a8a9595a9722795315c3a9"
+  },
+  "D:\\PROJECTS\\whtui\\src\\browser\\session.js": {
+    "mtime": 1780756887.2228034,
+    "ast_hash": "11fc1975f90d6979dedc31478214f107",
+    "semantic_hash": "11fc1975f90d6979dedc31478214f107"
+  },
+  "D:\\PROJECTS\\whtui\\src\\models\\chat.js": {
+    "mtime": 1780757122.3080275,
+    "ast_hash": "7b6e6798827c689777b4743332041da2",
+    "semantic_hash": "7b6e6798827c689777b4743332041da2"
+  },
+  "D:\\PROJECTS\\whtui\\src\\models\\message.js": {
+    "mtime": 1780820361.0312352,
+    "ast_hash": "e6ca0d30b28ab31f5a73071aab669ae9",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\src\\state\\actions.js": {
+    "mtime": 1780820361.0323138,
+    "ast_hash": "bc5b7616767675ed15ba58b78e973358",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\src\\state\\state.js": {
+    "mtime": 1780820361.0328496,
+    "ast_hash": "8a30dc383d700d547a96c4e3a8b0cca6",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\src\\tui\\commandbar.js": {
+    "mtime": 1780820347.8553886,
+    "ast_hash": "8be176a93651262ed34e44b787f0bab1",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\src\\tui\\helpContent.js": {
+    "mtime": 1780820347.8559206,
+    "ast_hash": "ec878f71f2e2062535b6f2d19b23e46e",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\src\\tui\\keybindings.js": {
+    "mtime": 1780820361.0333846,
+    "ast_hash": "cc0417ff60a21698c95c80627d635551",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\src\\tui\\layout.js": {
+    "mtime": 1780820361.0339217,
+    "ast_hash": "f8c855f26427e0fc2ee3c1bd8f3c72a8",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\src\\tui\\renderer.js": {
+    "mtime": 1780820361.0344405,
+    "ast_hash": "402b8654d63ba3a6c6ee7c9f2e65a36a",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\src\\tui\\screen.js": {
+    "mtime": 1780820361.0349755,
+    "ast_hash": "4ca2dc860e13451fabf2e3a3f1cb90ae",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\src\\tui\\statusbar.js": {
+    "mtime": 1780754146.5857472,
+    "ast_hash": "313f1d0d67735ee990818a7b52548821",
+    "semantic_hash": "313f1d0d67735ee990818a7b52548821"
+  },
+  "D:\\PROJECTS\\whtui\\src\\tui\\theme.js": {
+    "mtime": 1780760974.7915635,
+    "ast_hash": "6cd7415f20c62afc18b7978ae5d75508",
+    "semantic_hash": "6cd7415f20c62afc18b7978ae5d75508"
+  },
+  "D:\\PROJECTS\\whtui\\src\\tui\\themes.js": {
+    "mtime": 1780760959.201856,
+    "ast_hash": "7ade913f80b870d81001fc4cb23d2acc",
+    "semantic_hash": "7ade913f80b870d81001fc4cb23d2acc"
+  },
+  "D:\\PROJECTS\\whtui\\src\\utils\\debounce.js": {
+    "mtime": 1780753897.9616668,
+    "ast_hash": "51460119099accc94fa7e62334e5a3f1",
+    "semantic_hash": "51460119099accc94fa7e62334e5a3f1"
+  },
+  "D:\\PROJECTS\\whtui\\src\\utils\\formatters.js": {
+    "mtime": 1780820361.035513,
+    "ast_hash": "1c0ef872e8532b960dbf0349847faa78",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\src\\utils\\logger.js": {
+    "mtime": 1780753867.5924232,
+    "ast_hash": "d68b792886b4d11ebc2bc2a60ce4de10",
+    "semantic_hash": "d68b792886b4d11ebc2bc2a60ce4de10"
+  },
+  "D:\\PROJECTS\\whtui\\src\\utils\\time.js": {
+    "mtime": 1780753895.90227,
+    "ast_hash": "4d5395440d7373c89c38fb9dffb3965e",
+    "semantic_hash": "4d5395440d7373c89c38fb9dffb3965e"
+  },
+  "D:\\PROJECTS\\whtui\\tui\\chats.js": {
+    "mtime": 1780750578.568957,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "D:\\PROJECTS\\whtui\\tui\\input.js": {
+    "mtime": 1780750599.9436567,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "D:\\PROJECTS\\whtui\\tui\\keybindings.js": {
+    "mtime": 1780750963.356767,
+    "ast_hash": "7f69e5f0cc37675131c0c1a45127934c",
+    "semantic_hash": "7f69e5f0cc37675131c0c1a45127934c"
+  },
+  "D:\\PROJECTS\\whtui\\tui\\layout.js": {
+    "mtime": 1780751697.6380916,
+    "ast_hash": "88b643084f597a510e092a257c5cb493",
+    "semantic_hash": "88b643084f597a510e092a257c5cb493"
+  },
+  "D:\\PROJECTS\\whtui\\tui\\messages.js": {
+    "mtime": 1780750593.6721194,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "D:\\PROJECTS\\whtui\\tui\\screen.js": {
+    "mtime": 1780750918.6966987,
+    "ast_hash": "59de978ca87538fd3e1ceb4cdbb326f7",
+    "semantic_hash": "59de978ca87538fd3e1ceb4cdbb326f7"
+  },
+  "D:\\PROJECTS\\whtui\\README.md": {
+    "mtime": 1780820511.7823856,
+    "ast_hash": "55effd95b0b0884bf26697b9312a4b91",
+    "semantic_hash": ""
+  },
+  "D:\\PROJECTS\\whtui\\.agents\\rules\\graphify.md": {
+    "mtime": 1780762516.7602565,
+    "ast_hash": "a0e4d192b9e2e17256124dbfc8e24e6a",
+    "semantic_hash": "a0e4d192b9e2e17256124dbfc8e24e6a"
+  },
+  "D:\\PROJECTS\\whtui\\.agents\\workflows\\graphify.md": {
+    "mtime": 1780762516.7615786,
+    "ast_hash": "84de69efd46ab0b8430393bd4188f8f2",
+    "semantic_hash": "84de69efd46ab0b8430393bd4188f8f2"
+  },
+  "D:\\PROJECTS\\whtui\\storage\\README.md": {
+    "mtime": 1780754289.2916136,
+    "ast_hash": "13dedd92124af0e89c729c7597dd5cc9",
+    "semantic_hash": "13dedd92124af0e89c729c7597dd5cc9"
+  },
+  "D:\\PROJECTS\\whtui\\storage\\browser-profile\\Default\\Service Worker\\CacheStorage\\0bf6ab7f94a21cdc9c1649f884333ec20f40a544\\index.txt": {
+    "mtime": 1780762137.423915,
+    "ast_hash": "c1b4f8a2ec514e64416eaf164755677e",
+    "semantic_hash": "c1b4f8a2ec514e64416eaf164755677e"
+  }
+}
