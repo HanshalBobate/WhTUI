@@ -1,45 +1,36 @@
 /**
- * commandbar.js
+ * commandbar.js  —  WHTUI V2
  *
  * Vim-style command input handler.
- *
- * Handles the ':' command mode input, parsing, and execution.
  *
  * Supported commands:
  *   :q  / :quit        → exit the application
  *   :qa / :quitall     → exit the application (alias)
  *   :search <term>     → set search query
  *   :open <title>      → open chat by title
- *   :clear             → clear current search
+ *   :clear             → clear current search/filter
  *   :reload            → force re-scrape chat list
- *   :help              → show keybindings in the message box
+ *   :refresh           → refresh open chat messages
+ *   :help              → show keybindings
+ *   :logout            → logout and wipe session
+ *   :theme <name>      → switch color theme
+ *
+ *   V2 commands:
+ *   :unread            → filter chat list to unread only
+ *   :pinned            → filter chat list to pinned only
+ *   :groups            → filter chat list to groups only
+ *   :all               → clear filter (show all chats)
+ *   :compact           → toggle compact message rendering
+ *   :split             → toggle split view (alias for Ctrl+W)
  */
 
 const screen    = require('./screen');
 const { commandBar, reapplyTheme } = require('./layout');
 const actions   = require('../state/actions');
+const state     = require('../state/state');
 const log       = require('../utils/logger');
 const { setTheme, getAvailableThemes } = require('./theme');
 
-/** Map of registered command handlers: command-name → async handler(args) */
-const COMMANDS = {};
-
-/**
- * Register a command handler.
- *
- * @param {string}   name     The command name (without ':')
- * @param {Function} handler  async (args: string) => void
- */
-function registerCommand(name, handler) {
-    COMMANDS[name] = handler;
-}
-
-/**
- * Execute a raw command string (without the leading ':').
- *
- * @param {string}   raw       e.g. 'q' or 'search hello'
- * @param {object}   context   { reloadChats: Function }
- */
 async function executeCommand(raw, context) {
     const trimmed = raw.trim();
     const [cmd, ...argParts] = trimmed.split(/\s+/);
@@ -62,6 +53,7 @@ async function executeCommand(raw, context) {
 
         case 'clear':
             actions.setSearchQuery('');
+            actions.setFilterMode('all');
             actions.setMode('normal');
             break;
 
@@ -95,7 +87,7 @@ async function executeCommand(raw, context) {
 
         case 'theme':
             if (!args) {
-                _showError(`Available themes: ${getAvailableThemes().join(', ')}`);
+                _showMsg(`Available themes: ${getAvailableThemes().join(', ')}`);
             } else {
                 if (setTheme(args)) {
                     reapplyTheme();
@@ -106,6 +98,40 @@ async function executeCommand(raw, context) {
             }
             break;
 
+        // ── V2 filter commands ─────────────────────────────────────────────
+
+        case 'unread':
+            actions.setFilterMode('unread');
+            _showMsg(`Showing unread chats (${state.filteredChats.length})`);
+            break;
+
+        case 'pinned':
+            actions.setFilterMode('pinned');
+            _showMsg(`Showing pinned chats (${state.filteredChats.length})`);
+            break;
+
+        case 'groups':
+            actions.setFilterMode('groups');
+            _showMsg(`Showing groups (${state.filteredChats.length})`);
+            break;
+
+        case 'all':
+            actions.setFilterMode('all');
+            actions.setSearchQuery('');
+            break;
+
+        // ── V2 rendering commands ──────────────────────────────────────────
+
+        case 'compact':
+            actions.setCompactMessages();  // toggle
+            _showMsg(state.compactMessages ? 'Compact mode ON' : 'Compact mode OFF');
+            break;
+
+        case 'split':
+            actions.setSplitView();  // toggle
+            _showMsg(state.splitView ? 'Split view ON' : 'Split view OFF');
+            break;
+
         default:
             log.warn(`Unknown command: :${cmd}`);
             _showError(`Unknown command: :${cmd}`);
@@ -114,7 +140,7 @@ async function executeCommand(raw, context) {
 
 function _showError(msg) {
     commandBar.show();
-    commandBar.setContent(`{red-fg}Error: ${msg}{/red-fg}`);
+    commandBar.setContent(`{red-fg}${msg}{/red-fg}`);
     screen.render();
     setTimeout(() => {
         commandBar.hide();
@@ -122,4 +148,14 @@ function _showError(msg) {
     }, 2000);
 }
 
-module.exports = { executeCommand, registerCommand };
+function _showMsg(msg) {
+    commandBar.show();
+    commandBar.setContent(`{grey-fg}${msg}{/grey-fg}`);
+    screen.render();
+    setTimeout(() => {
+        commandBar.hide();
+        screen.render();
+    }, 1500);
+}
+
+module.exports = { executeCommand };

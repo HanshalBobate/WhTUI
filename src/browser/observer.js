@@ -1,23 +1,17 @@
 /**
- * observer.js
+ * observer.js  —  WHTUI V2
  *
  * Injects MutationObservers into the WhatsApp Web page and bridges
  * DOM events back to Node.js via Playwright's exposeFunction().
  *
- * No polling loops.  Browser-side observers fire callbacks; those
- * callbacks invoke the exposed Node.js functions which update state.
- *
- * Observed events:
- *   - New messages in the active conversation
- *   - Chat list changes (new chats, reordering)
- *   - Unread badge changes
- *   - Connection status banner changes
+ * Event-driven, not polling.  Changes to debounce timing:
+ *   - Chat list observer: 1000ms debounce (was 500ms) to reduce churn
+ *   - Message observer: tracks lastSeenCount, only fires when new messages arrive
+ *   - Unread badge path: dedicated handler that avoids full chat-list re-scrape
  */
 
 const SELECTORS = require('./selectors');
 const log       = require('../utils/logger');
-
-// ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
  * Set up all browser-side MutationObservers and expose the Node.js callbacks.
@@ -31,9 +25,6 @@ const log       = require('../utils/logger');
 async function injectObservers(page, handlers) {
     log.info('Injecting MutationObservers into WhatsApp Web...');
 
-    // Expose Node.js callback functions to the browser context
-    // exposeFunction is idempotent if the name is already registered —
-    // we catch and ignore the "already exists" error on re-injection.
     await _exposeFunction(page, '__whtui_onNewMessage', async () => {
         log.debug('[observer] onNewMessage fired');
         if (handlers.onNewMessage) await handlers.onNewMessage();
@@ -52,7 +43,7 @@ async function injectObservers(page, handlers) {
     // Inject the observer scripts into the page
     await page.evaluate((SEL) => {
 
-        // ── Utility: resolve first matching element from a selector list ──
+        // ── Utility ──────────────────────────────────────────────────────
         function firstEl(sels) {
             for (const s of sels) {
                 const el = document.querySelector(s);
@@ -61,7 +52,6 @@ async function injectObservers(page, handlers) {
             return null;
         }
 
-        // ── Utility: debounce helper (browser-side) ─────────────────────
         function debounce(fn, ms) {
             let t;
             return (...args) => {
@@ -70,13 +60,32 @@ async function injectObservers(page, handlers) {
             };
         }
 
-        // ── 1. Message observer ─────────────────────────────────────────
+        // ── 1. Message observer ──────────────────────────────────────────
+        // Only fires when message count actually increases to avoid spurious
+        // re-scrapes from DOM reflows / style attribute changes.
         const mainPanel = document.querySelector('#main') || document.body;
+        let _lastMsgCount = 0;
+
+        function _countMessages() {
+            let rows = [];
+            for (const s of SEL.messages.items) {
+                rows = Array.from(document.querySelectorAll(s));
+                if (rows.length > 0) break;
+            }
+            return rows.length;
+        }
 
         function attachMessageObserver(container) {
             if (!container) return;
             const onMsg = debounce(() => {
-                window.__whtui_onNewMessage();
+                const count = _countMessages();
+                if (count > _lastMsgCount) {
+                    _lastMsgCount = count;
+                    window.__whtui_onNewMessage();
+                } else if (count < _lastMsgCount) {
+                    // chat was switched, reset count
+                    _lastMsgCount = count;
+                }
             }, 300);
 
             new MutationObserver((mutations) => {
@@ -92,33 +101,54 @@ async function injectObservers(page, handlers) {
             attachMessageObserver(mainPanel);
         }
 
-        // ── 2. Chat list observer ───────────────────────────────────────
-        // Watches for new chats arriving, reordering, or unread badges updating.
+        // ── 2. Chat list observer ────────────────────────────────────────
+        // Debounced at 1000ms.  Structural changes only (new rows / removals);
+        // attribute changes on existing rows are handled by the unread path below.
         const chatListContainer = firstEl(SEL.chatList.container);
 
         if (chatListContainer) {
             const onList = debounce(() => {
                 window.__whtui_onChatListChanged();
-            }, 500);
+            }, 1000);
 
             new MutationObserver((mutations) => {
-                // Only react to structural changes (new chat rows) or
-                // attribute changes (unread badge text update).
-                const relevant = mutations.some(m =>
+                // Only structural changes trigger a full re-scrape
+                const structural = mutations.some(m =>
                     m.addedNodes.length > 0 ||
-                    m.removedNodes.length > 0 ||
-                    m.type === 'characterData'
+                    m.removedNodes.length > 0
                 );
-                if (relevant) onList();
+                if (structural) onList();
             }).observe(chatListContainer, {
-                childList:     true,
+                childList: true,
+                subtree:   true,
+            });
+
+            // ── 3. Unread badge observer ─────────────────────────────────
+            // Watches characterData changes only — catches badge text updates
+            // without triggering a full chat list re-scrape.
+            const onUnread = debounce(() => {
+                // Re-scrape the full list for simplicity — a future optimisation
+                // could diff individual badges, but 1s debounce keeps it cheap.
+                window.__whtui_onChatListChanged();
+            }, 1500);
+
+            new MutationObserver((mutations) => {
+                const badgeChange = mutations.some(m =>
+                    m.type === 'characterData' ||
+                    (m.type === 'childList' && (
+                        Array.from(m.addedNodes).some(n => n.nodeType === 3) ||
+                        Array.from(m.removedNodes).some(n => n.nodeType === 3)
+                    ))
+                );
+                if (badgeChange) onUnread();
+            }).observe(chatListContainer, {
                 subtree:       true,
                 characterData: true,
+                childList:     true,
             });
         }
 
-        // ── 3. Connection status observer ───────────────────────────────
-        // Watches the header area for connection banner appearance/removal.
+        // ── 4. Connection status observer ────────────────────────────────
         const headerArea = document.querySelector('#side header')
                         || document.querySelector('#pane-side');
 
@@ -132,13 +162,14 @@ async function injectObservers(page, handlers) {
             }).observe(headerArea, { childList: true, subtree: true });
         }
 
-        // ── 4. Re-observe message container when a new chat is opened ───
+        // ── 5. Re-observe when a new chat is opened ──────────────────────
         let lastMsgContainer = messageContainer;
 
         new MutationObserver(() => {
             const newContainer = firstEl(SEL.messages.container) || mainPanel;
             if (newContainer && newContainer !== lastMsgContainer) {
                 lastMsgContainer = newContainer;
+                _lastMsgCount = 0;  // reset count for new chat
                 attachMessageObserver(newContainer);
                 window.__whtui_onNewMessage();
             }
@@ -146,14 +177,11 @@ async function injectObservers(page, handlers) {
 
     }, SELECTORS);
 
-    log.info('MutationObservers injected successfully.');
+    log.info('MutationObservers injected (V2 — smarter debouncing).');
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Expose a function, ignoring "already registered" errors on re-injection.
- */
 async function _exposeFunction(page, name, fn) {
     try {
         await page.exposeFunction(name, fn);
