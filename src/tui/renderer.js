@@ -1,47 +1,41 @@
 /**
- * renderer.js  —  WHTUI V2
+ * renderer.js
  *
- * Translates application state → blessed widget content.
+ * Rendering functions that translate application state → blessed widget content.
  *
- * Design principles:
- *   - Diff-aware: only redraw what changed
- *   - Grouped sender messages by default, compact mode optional
- *   - No labels/borders on main panels — content only
- *   - Startup splash runs until startupDone
- *   - Preview popup is a floating overlay
+ * Key fixes in this version:
+ *  - Chat list shows NAME ONLY (no message preview)
+ *  - Message pane only auto-scrolls to bottom when messages actually change
+ *    (prevents J/K scroll position being reset on every j/k keypress)
+ *  - LazyNvim-style statusline with mode pill
  */
 
 'use strict';
 
-const screen = require('./screen');
+const screen  = require('./screen');
 const {
-    topBar, chatPanel, msgPanel, statusBar, commandBar,
-    inputBox, previewBox, startupBox,
-    applyLayout, getChatPanelInnerWidth, getMsgPanelInnerWidth,
+    chatList, messageBox, statusBar, commandBar,
+    applyLayout, getChatListInnerWidth,
 } = require('./layout');
-const { THEME } = require('./theme');
+const { THEME }   = require('./theme');
 const state   = require('../state/state');
-const {
-    formatChatRow, formatMessage, formatMessageCompact,
-    formatGroupedMessages, truncate, stripTags, formatTimeAgo,
-} = require('../utils/formatters');
+const { formatChatRow, formatMessage, truncate } = require('../utils/formatters');
 const { dateSeparator, sameDay } = require('../utils/time');
 const {
+    getWelcomeText,
     getHelpText,
     getContextHints,
+    getChatPreview,
 } = require('./helpContent');
-
-// ── Constants ─────────────────────────────────────────────────────────────────
 
 // Maximum messages to render at once (virtualization ceiling)
 const MAX_MESSAGES = 200;
 
-// Startup splash steps accumulator
-const _startupSteps = [];  // { text, done }
-let   _startupCurrentText = null;
-
 // ── Message scroll tracking ───────────────────────────────────────────────────
-let _msgSig = '';
+// We only snap the message pane to the bottom when messages genuinely change
+// (new chat opened, or new message received). Otherwise the user's manual
+// J/K scroll position is preserved across renders.
+let _msgSig = '';        // signature of last rendered message list
 
 function _getMessageSig(msgs) {
     if (!msgs.length) return '';
@@ -49,338 +43,167 @@ function _getMessageSig(msgs) {
     return `${msgs.length}:${last.id}:${last.text}`;
 }
 
+/**
+ * Call this whenever the app intentionally navigates to a new chat so the
+ * next renderMessages() knows to snap to the bottom.
+ */
 function resetMessageScroll() {
     _msgSig = '';
 }
 
-// ── Startup splash ────────────────────────────────────────────────────────────
-
-/**
- * Record a startup step (called from main.js withSpinner).
- * Keeps a running list of steps with their completion state.
- *
- * @param {string|null} text  Step description or null when done
- */
-function recordStartupStep(text) {
-    if (text === null) {
-        // Mark last step as done
-        if (_startupSteps.length > 0) {
-            _startupSteps[_startupSteps.length - 1].done = true;
-        }
-        _startupCurrentText = null;
-        return;
-    }
-    // Dedup: only add a new entry if this step text is different from the last one recorded
-    if (_startupCurrentText === text) return;
-    // Mark previous step done if any
-    if (_startupSteps.length > 0 && !_startupSteps[_startupSteps.length - 1].done) {
-        _startupSteps[_startupSteps.length - 1].done = true;
-    }
-    _startupSteps.push({ text, done: false });
-    _startupCurrentText = text;
-}
-
-function renderStartup(spinnerFrame) {
-    if (state.startupDone) {
-        startupBox.hide();
-        return;
-    }
-
-    const W = screen.width;
-    const H = screen.height;
-
-    // Build lines
-    const lines = [];
-    lines.push('');
-    lines.push('{center}{bold}{green-fg}whtui{/green-fg}{/bold}{center}');
-    lines.push('');
-
-    for (const step of _startupSteps) {
-        const icon = step.done
-            ? '{green-fg}✓{/green-fg}'
-            : (spinnerFrame ? `{yellow-fg}${spinnerFrame}{/yellow-fg}` : '{yellow-fg}◌{/yellow-fg}');
-        const label = step.done
-            ? `{grey-fg}${step.text}{/grey-fg}`
-            : `{white-fg}${step.text}{/white-fg}`;
-        lines.push(`  ${label.padEnd(36, ' ')} ${icon}`);
-    }
-
-    if (state.startupDone) {
-        lines.push('');
-        lines.push('  {green-fg}Ready.{/green-fg}');
-    }
-
-    // Center vertically
-    const contentH = lines.length;
-    const padTop   = Math.max(0, Math.floor((H - contentH) / 2));
-    const padLines = Array(padTop).fill('');
-
-    startupBox.setContent([...padLines, ...lines].join('\n'));
-    startupBox.show();
-}
-
-// ── Top bar ───────────────────────────────────────────────────────────────────
-
-function renderTopBar() {
-    const W    = screen.width;
-    const conn = state.connectionStatus;
-    const vm   = state.viewMode;
-
-    // Left: WHTUI brand
-    const brand = '{bold}{green-fg}WHTUI{/green-fg}{/bold}';
-    const brandVis = 'WHTUI';
-
-    // Center / context
-    let ctx = '';
-    let ctxVis = '';
-
-    if (state.mode === 'search' && state.searchQuery) {
-        ctx    = `{yellow-fg}/ ${state.searchQuery}{/yellow-fg}`;
-        ctxVis = `/ ${state.searchQuery}`;
-    } else if (vm === 'chat-view' && state.currentChatTitle) {
-        ctx    = `{bold}${truncate(state.currentChatTitle, 40)}{/bold}`;
-        ctxVis = truncate(state.currentChatTitle, 40);
-    } else if (vm === 'chat-list' || vm === 'split') {
-        const n = state.filteredChats.length;
-        const fm = state.filterMode !== 'all' ? ` · ${state.filterMode}` : '';
-        ctx    = `{grey-fg}${n} chats${fm}{/grey-fg}`;
-        ctxVis = `${n} chats${fm}`;
-    }
-
-    // Right: connection status
-    let connStr, connVis;
-    switch (conn) {
-        case 'ONLINE':     connStr = '{green-fg}● ONLINE{/green-fg}';         connVis = '● ONLINE';       break;
-        case 'OFFLINE':    connStr = '{red-fg}● OFFLINE{/red-fg}';            connVis = '● OFFLINE';      break;
-        case 'CONNECTING': connStr = '{yellow-fg}◌ CONNECTING{/yellow-fg}';   connVis = '◌ CONNECTING';   break;
-        case 'SYNCING':    connStr = '{yellow-fg}⟳ SYNCING{/yellow-fg}';      connVis = '⟳ SYNCING';      break;
-        default:           connStr = '{grey-fg}◌ STARTING{/grey-fg}';         connVis = '◌ STARTING';
-    }
-
-    // Padding
-    const leftLen  = brandVis.length + 2;
-    const rightLen = connVis.length + 2;
-    const ctxLen   = ctxVis.length;
-    const padL     = Math.max(1, Math.floor((W - ctxLen) / 2) - leftLen);
-    const padR     = Math.max(1, W - leftLen - padL - ctxLen - rightLen);
-
-    topBar.setContent(
-        ` ${brand}${' '.repeat(padL)}${ctx}${' '.repeat(padR)}${connStr} `
-    );
-}
-
-// ── Chat list ─────────────────────────────────────────────────────────────────
+// ── Chat list renderer ────────────────────────────────────────────────────────
 
 function renderChats() {
     const chats = state.filteredChats;
-    const width = getChatPanelInnerWidth();
+    const width = getChatListInnerWidth();
 
     const selectedIdx = Math.min(
         state.selectedChatIdx,
         Math.max(0, chats.length - 1)
     );
 
+    // Build plain-text items — no blessed tags (list widget uses tags:false)
     const items = chats.map((chat, idx) =>
         formatChatRow(chat, width, idx === selectedIdx)
     );
 
-    chatPanel.setItems(items);
+    // Label
+    if (state.mode === 'search' && state.searchQuery) {
+        chatList.setLabel(` /${state.searchQuery} `);
+    } else if (chats.length > 0) {
+        chatList.setLabel(` Chats (${chats.length}) `);
+    } else {
+        chatList.setLabel(' Chats ');
+    }
+
+    chatList.setItems(items);
 
     if (items.length > 0) {
-        chatPanel.select(selectedIdx);
+        chatList.select(selectedIdx);
 
-        // Scroll to keep selection visible
-        const innerH = chatPanel.height - 1;
-        const child  = chatPanel.childOffset || 0;
+        // Ensure the selected row is visible — scroll the list if needed.
+        // We control this ourselves because vi:false means blessed won't auto-scroll.
+        const innerH = chatList.height - 2;   // subtract borders
+        const child  = chatList.childOffset || 0;
         if (selectedIdx < child) {
-            chatPanel.scrollTo(selectedIdx);
+            chatList.scrollTo(selectedIdx);
         } else if (selectedIdx >= child + innerH) {
-            chatPanel.scrollTo(Math.max(0, selectedIdx - innerH + 1));
+            chatList.scrollTo(Math.max(0, selectedIdx - innerH + 1));
         }
     }
 }
 
-// ── Message renderer ──────────────────────────────────────────────────────────
+// ── Message renderer ─────────────────────────────────────────────────────────
 
-function renderMessages(spinnerFrame) {
-    // ── QR screen ──────────────────────────────────────────────────────────
+function renderMessages() {
+    // ── Special screens ────────────────────────────────────────────────────
     if (state.qrDisplayContent) {
-        msgPanel.setContent(state.qrDisplayContent);
+        messageBox.setLabel(' {bold}Link Device{/bold} ');
+        messageBox.setContent(state.qrDisplayContent);
+        screen.render();
         return;
     }
 
-    // ── Loading ─────────────────────────────────────────────────────────────
     if (state.isLoading) {
-        const spin = spinnerFrame ? `{yellow-fg}${spinnerFrame}{/yellow-fg} ` : '';
-        msgPanel.setContent(
-            `\n{center}${spin}{yellow-fg}${state.loadingText}{/yellow-fg}{/center}\n`
+        messageBox.setLabel(' {bold}Loading…{/bold} ');
+        messageBox.setContent(
+            `\n{center}{yellow-fg}${state.loadingText}{/yellow-fg}{/center}\n`
         );
+        screen.render();
         return;
     }
 
-    // ── Help panel ──────────────────────────────────────────────────────────
     if (state.showHelpPanel) {
-        msgPanel.setContent(getHelpText());
+        messageBox.setLabel(' {bold}Help{/bold} ');
+        messageBox.setContent(getHelpText());
+        screen.render();
         return;
     }
 
-    // ── No chats ─────────────────────────────────────────────────────────────
+    if (state.showWelcome && !state.currentChatId && state.chats.length > 0) {
+        messageBox.setLabel(' {bold}Getting Started{/bold} ');
+        messageBox.setContent(getWelcomeText(state.chats.length));
+        screen.render();
+        return;
+    }
+
     if (!state.currentChatId && state.chats.length === 0) {
-        msgPanel.setContent([
-            '',
+        messageBox.setLabel(' {bold}Notice{/bold} ');
+        messageBox.setContent([
             '{red-fg}{bold}No chats found.{/bold}{/red-fg}',
             '',
             'WhatsApp Web loaded but the chat list is empty.',
             'Wait a moment, then run {cyan-fg}:reload{/cyan-fg}.',
-            'If it persists, restart whtui.',
+            'If it persists, restart whtui or check {grey-fg}storage/logs/{/grey-fg}.',
         ].join('\n'));
+        screen.render();
         return;
     }
 
-    // ── Welcome / no chat selected ───────────────────────────────────────────
-    if (!state.currentChatId) {
-        const n = state.chats.length;
-        msgPanel.setContent([
-            '',
-            '{center}{bold}{green-fg}whtui{/green-fg}{/bold}{/center}',
-            '',
-            `{center}{grey-fg}${n} chat${n === 1 ? '' : 's'} loaded{/grey-fg}{/center}`,
-            '',
-            '{center}j/k navigate  ·  Enter open  ·  / search  ·  Space preview  ·  ? help{/center}',
-            '',
-            '{center}{grey-fg}Ctrl+W to toggle split view{/grey-fg}{/center}',
-        ].join('\n'));
-        return;
-    }
-
-    // ── Normal message rendering ─────────────────────────────────────────────
-    const msgs    = state.messages.slice(-MAX_MESSAGES);
-    const newSig  = _getMessageSig(msgs);
-    const changed = newSig !== _msgSig;
-    _msgSig       = newSig;
+    // ── Normal message rendering ───────────────────────────────────────────
+    const msgs = state.messages.slice(-MAX_MESSAGES);
+    const newSig = _getMessageSig(msgs);
+    const messagesChanged = newSig !== _msgSig;
+    _msgSig = newSig;
 
     if (msgs.length === 0) {
-        msgPanel.setContent(
-            '\n{center}{grey-fg}No messages loaded yet.  Press r to refresh.{/grey-fg}{/center}'
+        if (state.currentChatId) {
+            messageBox.setContent(
+                '\n{center}{grey-fg}No messages loaded yet{/grey-fg}{/center}'
+            );
+        } else {
+            const selected = state.filteredChats[state.selectedChatIdx] || null;
+            messageBox.setContent(getChatPreview(selected));
+        }
+        messageBox.setLabel(
+            state.currentChatTitle
+                ? ` {bold}${truncate(state.currentChatTitle, 40)}{/bold} `
+                : ' {bold}Preview{/bold} '
         );
+        screen.render();
         return;
     }
 
     const lines = [];
+    let prevTs  = null;
 
-    if (state.compactMessages) {
-        // ── Compact mode: one line per message ──────────────────────────────
-        let prevTs = null;
-        for (const msg of msgs) {
-            if (!sameDay(prevTs, msg.timestamp)) {
-                const sep = dateSeparator(msg.timestamp);
-                lines.push('');
-                lines.push(`{center}{grey-fg}──── ${sep} ────{/grey-fg}{/center}`);
-                lines.push('');
-            }
-            prevTs = msg.timestamp;
-            lines.push(formatMessageCompact(msg));
+    for (const msg of msgs) {
+        if (!sameDay(prevTs, msg.timestamp)) {
+            const sep = dateSeparator(msg.timestamp);
+            lines.push('');
+            lines.push(`{center}{grey-fg}─── ${sep} ───{/grey-fg}{/center}`);
+            lines.push('');
         }
-    } else {
-        // ── Grouped sender mode (default) ────────────────────────────────────
-        // Group consecutive messages by sender, intersperse date separators
-        let prevTs     = null;
-        let i          = 0;
-
-        while (i < msgs.length) {
-            const msg = msgs[i];
-
-            // Date separator
-            if (!sameDay(prevTs, msg.timestamp)) {
-                const sep = dateSeparator(msg.timestamp);
-                lines.push('');
-                lines.push(`{center}{grey-fg}──── ${sep} ────{/grey-fg}{/center}`);
-                lines.push('');
-            }
-
-            // Collect run of same-sender messages
-            const senderKey = msg.outgoing ? '__me__' : (msg.sender || 'contact');
-            const run = [msg];
-            let j = i + 1;
-            while (j < msgs.length) {
-                const next = msgs[j];
-                if (!sameDay(prevTs, next.timestamp) && !sameDay(msg.timestamp, next.timestamp)) break;
-                const nextKey = next.outgoing ? '__me__' : (next.sender || 'contact');
-                if (nextKey !== senderKey) break;
-                run.push(next);
-                j++;
-            }
-
-            // Render the run as a group
-            const groupLines = formatGroupedMessages(run);
-            lines.push(...groupLines);
-            prevTs = run[run.length - 1].timestamp;
-            i = j;
-        }
+        prevTs = msg.timestamp;
+        lines.push(formatMessage(msg, true));
+        lines.push('');
     }
 
-    lines.push('');  // trailing breathing room
+    messageBox.setContent(lines.join('\n'));
 
-    msgPanel.setContent(lines.join('\n'));
-
-    if (changed) {
-        msgPanel.setScrollPerc(100);
+    // Only auto-scroll to bottom when messages genuinely changed
+    // so manual J/K scrolling is not reset by unrelated state updates.
+    if (messagesChanged) {
+        messageBox.setScrollPerc(100);
     }
+
+    messageBox.setLabel(
+        state.currentChatTitle
+            ? ` {bold}${truncate(state.currentChatTitle, 40)}{/bold} `
+            : ' {bold}Messages{/bold} '
+    );
+
+    screen.render();
 }
 
-// ── Preview popup ─────────────────────────────────────────────────────────────
+// ── Status bar (LazyNvim-style) ───────────────────────────────────────────────
 
-function renderPreview() {
-    const chat = state.previewChat;
-
-    if (!chat) {
-        previewBox.hide();
-        return;
-    }
-
-    previewBox.setLabel(` ${truncate(chat.title, 40)} `);
-
-    const lines = [];
-
-    // Meta info
-    if (chat.unreadCount > 0) {
-        lines.push(`{green-fg}● ${chat.unreadCount} unread message${chat.unreadCount !== 1 ? 's' : ''}{/green-fg}`);
-    } else {
-        lines.push('{grey-fg}Up to date{/grey-fg}');
-    }
-
-    if (chat.muted)  lines.push('{grey-fg}⊗ Muted{/grey-fg}');
-    if (chat.pinned) lines.push('{grey-fg}⊕ Pinned{/grey-fg}');
-
-    // Last activity
-    const ago = formatTimeAgo(chat.lastTimestamp);
-    if (ago) lines.push(`{grey-fg}Last active: ${ago}{/grey-fg}`);
-
-    lines.push('');
-    lines.push('{grey-fg}────────────────────────────{/grey-fg}');
-    lines.push('');
-
-    // If this is the currently open chat, show actual messages
-    if (chat.id === state.currentChatId && state.messages.length > 0) {
-        const preview = state.messages.slice(-8);
-        const previewLines = formatGroupedMessages(preview);
-        lines.push(...previewLines);
-    } else if (chat.lastMessage) {
-        lines.push(`{grey-fg}Last message:{/grey-fg}`);
-        lines.push(chat.lastMessage);
-    } else {
-        lines.push('{grey-fg}No message preview available{/grey-fg}');
-    }
-
-    lines.push('');
-    lines.push('{center}{grey-fg}Space/Esc dismiss  ·  Enter open{/grey-fg}{/center}');
-
-    previewBox.setContent(lines.join('\n'));
-    previewBox.show();
-}
-
-// ── Status bar ────────────────────────────────────────────────────────────────
-
+/**
+ * Mode pills — mimic LazyNvim's colored mode indicator.
+ *
+ * In blessed, {COLOR-bg}{COLOR-fg} creates background-colored blocks.
+ * We pad the mode label so it reads like a pill.
+ */
 function getModePills() {
     return {
         normal:  `{${THEME.modes.normal.fg}-fg}{${THEME.modes.normal.bg}-bg}  NORMAL  {/}`,
@@ -390,45 +213,57 @@ function getModePills() {
     };
 }
 
+/** Strip blessed tags to measure visible length */
 function _vis(s) {
-    return stripTags(s);
+    return s.replace(/\{[^}]+\}/g, '');
 }
 
 function renderStatusBar(spinnerFrame) {
     const mode    = state.mode;
     const loading = state.isLoading;
+    const conn    = state.connectionStatus;
     const W       = screen.width;
 
-    // Left: mode pill + context label
+    // ── Left section: mode pill + context ─────────────────────────────────
     let leftRaw, leftVis;
 
     if (loading && spinnerFrame) {
-        const pill  = `{${THEME.modes.search.fg}-fg}{${THEME.modes.search.bg}-bg}  LOADING  {/}`;
+        const pill = `{${THEME.modes.search.fg}-fg}{${THEME.modes.search.bg}-bg}  LOADING  {/}`;
         const label = ` {grey-fg}${spinnerFrame} ${state.loadingText}{/grey-fg}`;
         leftRaw = pill + label;
         leftVis = _vis(pill) + _vis(label);
     } else {
         const pills = getModePills();
         const pill  = pills[mode] || pills.normal;
-        let label = '';
-        if (state.compactMessages && mode === 'normal') {
-            label = ' {grey-fg}compact{/grey-fg}';
-        }
-        if (state.filterMode !== 'all') {
-            label += ` {grey-fg}[${state.filterMode}]{/grey-fg}`;
+        let   label = '';
+        if (state.currentChatTitle) {
+            label = ` {bold}${truncate(state.currentChatTitle, 30)}{/bold}`;
+        } else {
+            label = ' {grey-fg}whtui{/grey-fg}';
         }
         leftRaw = pill + label;
         leftVis = _vis(pill) + _vis(label);
     }
 
-    // Right: context hints
-    const hints    = getContextHints(state);
-    const hintStr  = hints ? `{grey-fg}${hints}{/grey-fg}` : '';
-    const hintVis  = hints || '';
+    // ── Right section: hints + connection ─────────────────────────────────
+    const hints = getContextHints(state);
 
-    const rightRaw = hintStr ? `${hintStr} ` : '';
-    const rightVis = hintVis ? `${hintVis} ` : '';
+    let connStr, connVis;
+    switch (conn) {
+        case 'ONLINE':     connStr = '{green-fg}● ONLINE{/green-fg}';       connVis = '● ONLINE';      break;
+        case 'OFFLINE':    connStr = '{red-fg}● OFFLINE{/red-fg}';          connVis = '● OFFLINE';     break;
+        case 'CONNECTING': connStr = '{yellow-fg}◌ CONNECTING{/yellow-fg}'; connVis = '◌ CONNECTING';  break;
+        case 'SYNCING':    connStr = '{yellow-fg}⟳ SYNCING{/yellow-fg}';    connVis = '⟳ SYNCING';     break;
+        default:           connStr = '{grey-fg}◌ STARTING{/grey-fg}';       connVis = '◌ STARTING';
+    }
 
+    const hintStr = hints ? `{grey-fg}${hints}{/grey-fg}` : '';
+    const hintVis = hints || '';
+
+    const rightRaw = `${hintStr}  ${connStr} `;
+    const rightVis = `${hintVis}  ${connVis} `;
+
+    // ── Padding to fill the line ───────────────────────────────────────────
     const padLen = Math.max(1, W - leftVis.length - rightVis.length);
     const pad    = ' '.repeat(padLen);
 
@@ -450,75 +285,12 @@ function renderCommandBar(prefix, text) {
 
 // ── Master render ─────────────────────────────────────────────────────────────
 
-// Last-render signature for diff detection
-let _lastSig = {
-    viewMode: null,
-    splitView: null,
-    mode: null,
-    insertMode: null,
-    startupDone: false,
-    previewChat: null,
-    screenW: null,
-    screenH: null,
-};
-
 function render(spinnerFrame) {
-    const vm         = state.viewMode;
-    const insertMode = state.mode === 'insert';
-    const split      = state.splitView;
-
-    // ── Startup overlay ───────────────────────────────────────────────────
-    if (!state.startupDone) {
-        recordStartupStep(state.startupStep);
-        renderStartup(spinnerFrame);
-        renderStatusBar(spinnerFrame);
-        screen.render();
-        return;
-    } else if (!_lastSig.startupDone) {
-        startupBox.hide();
-    }
-
-    // ── Layout (only when mode/split/insert changes) ──────────────────────
-    const W = screen.width;
-    const H = screen.height;
-    const layoutChanged = (
-        vm         !== _lastSig.viewMode  ||
-        split      !== _lastSig.splitView ||
-        insertMode !== _lastSig.insertMode ||
-        W          !== _lastSig.screenW ||
-        H          !== _lastSig.screenH
-    );
-
-    if (layoutChanged) {
-        applyLayout(vm, insertMode);
-    }
-
-    // ── Render each section ───────────────────────────────────────────────
-
-    // Chat panel: render when visible
-    if (vm === 'chat-list' || vm === 'split') {
-        renderChats();
-    }
-
-    // Message panel: render when visible
-    if (vm === 'chat-view' || vm === 'split') {
-        renderMessages(spinnerFrame);
-    }
-
-    // In chat-list mode, if loading/QR/help show it in the full screen
-    if (vm === 'chat-list') {
-        if (state.qrDisplayContent || state.isLoading || state.showHelpPanel) {
-            // Switch to full-screen message view temporarily
-            applyLayout('chat-view', false);
-            renderMessages(spinnerFrame);
-        }
-    }
-
-    // Top bar, status bar — always
-    renderTopBar();
+    applyLayout();
+    renderChats();
+    renderMessages();
     renderStatusBar(spinnerFrame);
 
-    // Command bar
     if (state.mode === 'command') {
         renderCommandBar(':', state.commandInput);
     } else if (state.mode === 'search') {
@@ -527,28 +299,8 @@ function render(spinnerFrame) {
         renderCommandBar(null, '');
     }
 
-    // Preview popup
-    renderPreview();
-
-    // Track last sig
-    _lastSig = {
-        viewMode:    vm,
-        splitView:   split,
-        mode:        state.mode,
-        insertMode,
-        startupDone: state.startupDone,
-        previewChat: state.previewChat,
-        screenW:     W,
-        screenH:     H,
-    };
-
     screen.render();
 }
-
-screen.on('resize', () => {
-    // Force complete redraw on resize
-    render();
-});
 
 module.exports = {
     render,
@@ -556,8 +308,5 @@ module.exports = {
     renderMessages,
     renderStatusBar,
     renderCommandBar,
-    renderTopBar,
-    renderPreview,
-    recordStartupStep,
     resetMessageScroll,
 };

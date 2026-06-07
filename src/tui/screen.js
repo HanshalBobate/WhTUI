@@ -11,10 +11,9 @@ const blessed = require('blessed');
 const { THEME } = require('./theme');
 
 const screen = blessed.screen({
-    smartCSR:    true,           // Efficient per-cell updates; enables 256-colour on Windows ConPTY
+    smartCSR:    false,
     fullUnicode: true,
-    dockBorders: true,           // Merge adjacent borders cleanly
-    terminal:    'xterm-256color',  // Force correct colour depth
+    dockBorders: true,      // Merge adjacent borders cleanly
     title:       'whtui — WhatsApp Terminal',
     cursor: {
         artificial: true,

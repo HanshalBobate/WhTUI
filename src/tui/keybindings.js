@@ -1,80 +1,56 @@
 /**
- * keybindings.js  —  WHTUI V2
+ * keybindings.js
  *
- * All keyboard event handlers.  Vim/lazygit-inspired.
+ * All keyboard event handlers for WHTUI.
  *
- * NORMAL MODE (chat-list view)
- * ─────────────────────────────────────────────────
- *  j / ↓          Move selection down
- *  k / ↑          Move selection up
- *  Ctrl-d         Jump down ¼ of list
- *  Ctrl-u         Jump up ¼ of list
- *  gg             Jump to first chat
- *  G              Jump to last chat
- *  Enter          Open highlighted chat  (→ chat-view)
- *  Space          Toggle preview popup
- *  /              Enter search mode
- *  :              Enter command mode
- *  ?              Show help
- *  q              Quit
+ * LazyNvim-inspired keybindings:
  *
- * NORMAL MODE (chat-view / split — message pane focused)
- * ─────────────────────────────────────────────────
- *  j / k / J / K  Scroll messages
- *  Ctrl-d / Ctrl-u  Scroll half-page
- *  Ctrl-f / PgDn  Page down
- *  Ctrl-b / PgUp  Page up
- *  gg             Jump to top of messages
- *  G              Jump to bottom of messages
- *  Esc / Z        Close chat → return to chat-list
- *  i              Compose (→ INSERT mode)
- *  r              Refresh messages
+ *  NORMAL MODE (chat list)
+ *  ────────────────────────
+ *  j / ↓        Move selection down
+ *  k / ↑        Move selection up
+ *  Ctrl-d       Jump down ¼ of list
+ *  Ctrl-u       Jump up ¼ of list
+ *  gg           Jump to first chat
+ *  G            Jump to last chat
+ *  Enter        Open highlighted chat
+ *  i            Compose (Insert mode) for open chat
+ *  Tab          Switch focus: chat list ↔ message pane
  *
- * SPLIT MODE
- * ─────────────────────────────────────────────────
- *  Tab / Shift+Tab  Cycle focus between panes
+ *  MESSAGE PANE SCROLL (Normal mode)
+ *  ──────────────────────────────────
+ *  J / K        Scroll messages down / up (3 lines)
+ *  Ctrl-f       Scroll messages down half-page
+ *  Ctrl-b       Scroll messages up half-page
  *
- * GLOBAL
- * ─────────────────────────────────────────────────
- *  Ctrl-W         Toggle split view
- *  Ctrl-L         Force full redraw
- *  Ctrl-c         Quit always
+ *  SEARCH MODE  /  COMMAND MODE
+ *  ─────────────────────────────
+ *  /            Enter search
+ *  :            Enter command
+ *  Esc          Cancel / back to normal
+ *  Enter        Confirm
  *
- * INSERT MODE
- * ─────────────────────────────────────────────────
- *  Enter / Ctrl-s  Send message
- *  Esc             Cancel → NORMAL
+ *  INSERT MODE (compose)
+ *  ──────────────────────
+ *  Esc          Cancel compose
+ *  Enter        Send message
  *
- * SEARCH MODE
- * ─────────────────────────────────────────────────
- *  (type)          Build query live
- *  Backspace       Delete char
- *  n / N           Next / prev result
- *  Enter           Open top result
- *  Esc             Clear search → NORMAL
- *
- * COMMAND MODE
- * ─────────────────────────────────────────────────
- *  (type)          Build command
- *  Backspace       Delete char
- *  Enter           Execute
- *  Esc             Cancel → NORMAL
- *
- * PREVIEW POPUP
- * ─────────────────────────────────────────────────
- *  Space / Esc     Dismiss
- *  Enter           Open chat
+ *  GLOBAL
+ *  ───────
+ *  ?            Show keybinding help
+ *  q            Quit (normal mode only)
+ *  Ctrl-c       Quit (always)
  */
 
 'use strict';
 
-const screen  = require('./screen');
-const { chatPanel, msgPanel, inputBox, commandBar, setFocusBorder } = require('./layout');
-const actions = require('../state/actions');
-const state   = require('../state/state');
+const screen   = require('./screen');
+const { chatList, messageBox, inputBox, commandBar } = require('./layout');
+const actions  = require('../state/actions');
+const state    = require('../state/state');
 const { executeCommand } = require('./commandbar');
 const { resetMessageScroll } = require('./renderer');
-const log     = require('../utils/logger');
+const log      = require('../utils/logger');
 
 // gg double-tap detection
 let _lastGTime = 0;
@@ -82,79 +58,66 @@ const GG_WINDOW_MS = 400;
 
 // ─── Focus tracking ──────────────────────────────────────────────────────────
 
-/** Which pane has logical focus in split mode: 'chat' | 'message' */
+/** Which pane has logical focus: 'chat' | 'message' */
 let _focusPane = 'chat';
 
 function focusChat() {
     _focusPane = 'chat';
-    chatPanel.focus();
-    setFocusBorder('chat');
+    chatList.focus();
 }
 
 function focusMessage() {
     _focusPane = 'message';
-    msgPanel.focus();
-    setFocusBorder('message');
+    messageBox.focus();
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Help ────────────────────────────────────────────────────────────────────
 
-/** True when j/k should navigate the message pane (not the chat list). */
-function _inMessagePane() {
-    return state.viewMode === 'chat-view'
-        || (state.viewMode === 'split' && _focusPane === 'message');
+function showHelp() {
+    actions.setShowHelp(true);
+    focusChat();
 }
 
-/** True when we're in the chat list pane. */
-function _inChatPane() {
-    return state.viewMode === 'chat-list'
-        || (state.viewMode === 'split' && _focusPane === 'chat');
+function dismissHelp() {
+    if (!state.showHelpPanel) return false;
+    actions.setShowHelp(false);
+    if (!state.currentChatId) actions.setShowWelcome(true);
+    focusChat();
+    screen.render();
+    return true;
 }
 
 // ─── Register ────────────────────────────────────────────────────────────────
 
 function registerKeys(context) {
-    const {
-        openSelectedChat,
-        sendMessage,
-        reloadChats,
-        refreshMessages,
-        openChatByTitle,
-        logout,
+    const { 
+        openSelectedChat, 
+        sendMessage, 
+        reloadChats, 
+        refreshMessages, 
+        openChatByTitle, 
+        logout 
     } = context;
 
-    // ── Send helper ─────────────────────────────────────────────────────────
+    // ── Send helper ────────────────────────────────────────────────────────
     async function sendFromCompose() {
         const text = inputBox.getValue().trim();
         if (!text) return;
         inputBox.clearValue();
-        if (typeof inputBox.scrollTo === 'function') inputBox.scrollTo(0);
         screen.render();
         await sendMessage(text);
     }
 
-    // ── Preview popup helper ─────────────────────────────────────────────────
-    function togglePreview() {
-        if (state.previewChat) {
-            actions.setPreviewChat(null);
-            return;
-        }
-        const chat = state.filteredChats[state.selectedChatIdx];
-        if (chat) {
-            actions.setPreviewChat(chat);
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // NAVIGATION: j / k / arrows
-    // ═══════════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════
+    // CHAT LIST NAVIGATION
+    // (We handle all movement ourselves — vi:false on chatList means no
+    //  blessed passthrough that would scroll the terminal at list boundaries)
+    // ══════════════════════════════════════════════════════════════════════
 
     screen.key(['j', 'down'], () => {
         if (state.mode !== 'normal') return;
-        if (state.previewChat) return;  // ignore nav while preview open
-
-        if (_inMessagePane()) {
-            msgPanel.scroll(3);
+        if (_focusPane === 'message') {
+            messageBox.scroll(1);
             screen.render();
         } else {
             actions.moveChatSelection('down', 1);
@@ -163,100 +126,101 @@ function registerKeys(context) {
 
     screen.key(['k', 'up'], () => {
         if (state.mode !== 'normal') return;
-        if (state.previewChat) return;
-
-        if (_inMessagePane()) {
-            msgPanel.scroll(-3);
+        if (_focusPane === 'message') {
+            messageBox.scroll(-1);
             screen.render();
         } else {
             actions.moveChatSelection('up', 1);
         }
     });
 
-    // Large jumps — Ctrl-d / Ctrl-u
     screen.key(['C-d'], () => {
         if (state.mode !== 'normal') return;
-        if (_inMessagePane()) {
-            const half = Math.max(3, Math.floor((msgPanel.height) / 2));
-            msgPanel.scroll(half);
-            screen.render();
-        } else {
-            const step = Math.max(1, Math.floor(state.filteredChats.length / 4));
-            actions.moveChatSelection('down', step);
-        }
+        const step = Math.max(1, Math.floor(state.filteredChats.length / 4));
+        actions.moveChatSelection('down', step);
     });
 
     screen.key(['C-u'], () => {
         if (state.mode !== 'normal') return;
-        if (_inMessagePane()) {
-            const half = Math.max(3, Math.floor((msgPanel.height) / 2));
-            msgPanel.scroll(-half);
-            screen.render();
-        } else {
-            const step = Math.max(1, Math.floor(state.filteredChats.length / 4));
-            actions.moveChatSelection('up', step);
-        }
+        const step = Math.max(1, Math.floor(state.filteredChats.length / 4));
+        actions.moveChatSelection('up', step);
     });
 
-    // Page scroll in message pane
-    screen.key(['C-f', 'pagedown'], () => {
-        if (state.mode !== 'normal') return;
-        const page = Math.max(3, msgPanel.height - 2);
-        msgPanel.scroll(page);
-        screen.render();
-    });
-
-    screen.key(['C-b', 'pageup'], () => {
-        if (state.mode !== 'normal') return;
-        const page = Math.max(3, msgPanel.height - 2);
-        msgPanel.scroll(-page);
-        screen.render();
-    });
-
-    // Shift+J / Shift+K — fine scroll always goes to message pane
-    screen.key(['J'], () => {
-        if (state.mode !== 'normal') return;
-        msgPanel.scroll(3);
-        screen.render();
-    });
-
-    screen.key(['K'], () => {
-        if (state.mode !== 'normal') return;
-        msgPanel.scroll(-3);
-        screen.render();
-    });
-
-    // gg — jump to first (chat or message top)
+    // gg — jump to first chat
     screen.key(['g'], () => {
         if (state.mode !== 'normal') return;
         const now = Date.now();
         if (now - _lastGTime <= GG_WINDOW_MS) {
-            if (_inMessagePane()) {
-                msgPanel.setScrollPerc(0);
-                screen.render();
-            } else {
-                actions.jumpChatSelection('first');
-            }
+            actions.jumpChatSelection('first');
             _lastGTime = 0;
         } else {
             _lastGTime = now;
         }
     });
 
-    // G — jump to last (chat or message bottom)
+    // G — jump to last chat
     screen.key(['S-g'], () => {
         if (state.mode !== 'normal') return;
-        if (_inMessagePane()) {
-            msgPanel.setScrollPerc(100);
+        actions.jumpChatSelection('last');
+    });
+
+    // S-z — Close current chat and return to Welcome Screen
+    screen.key(['S-z'], () => {
+        if (state.mode !== 'normal') return;
+        if (state.currentChatId) {
+            actions.selectChat(null, null);
+            actions.setShowWelcome(true);
+            focusChat();
             screen.render();
-        } else {
-            actions.jumpChatSelection('last');
         }
     });
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // ENTER — open / confirm
-    // ═══════════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════
+    // MESSAGE PANE SCROLLING
+    // J/K scroll 3 lines at a time; Ctrl-f/Ctrl-b scroll half a page.
+    // These work regardless of which pane has focus.
+    // ══════════════════════════════════════════════════════════════════════
+
+    screen.key(['J'], () => {
+        if (state.mode !== 'normal') return;
+        messageBox.scroll(3);
+        screen.render();
+    });
+
+    screen.key(['K'], () => {
+        if (state.mode !== 'normal') return;
+        messageBox.scroll(-3);
+        screen.render();
+    });
+
+    screen.key(['C-f', 'pagedown'], () => {
+        if (state.mode !== 'normal') return;
+        const half = Math.max(3, Math.floor((messageBox.height - 2) / 2));
+        messageBox.scroll(half);
+        screen.render();
+    });
+
+    screen.key(['C-b', 'pageup'], () => {
+        if (state.mode !== 'normal') return;
+        const half = Math.max(3, Math.floor((messageBox.height - 2) / 2));
+        messageBox.scroll(-half);
+        screen.render();
+    });
+
+    // ── Tab: toggle focus between chat list and message pane ───────────────
+    screen.key(['tab'], () => {
+        if (state.mode !== 'normal') return;
+        if (_focusPane === 'chat') {
+            focusMessage();
+        } else {
+            focusChat();
+        }
+        screen.render();
+    });
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ENTER — context-sensitive confirm
+    // ══════════════════════════════════════════════════════════════════════
 
     screen.key(['enter'], async () => {
         if (state.mode === 'insert') return;
@@ -274,27 +238,12 @@ function registerKeys(context) {
         if (state.mode === 'search') {
             actions.setMode('normal');
             resetMessageScroll();
-            if (state.previewChat) actions.setPreviewChat(null);
             await openSelectedChat();
             return;
         }
 
         if (state.showHelpPanel) {
-            actions.setShowHelp(false);
-            focusChat();
-            screen.render();
-            return;
-        }
-
-        // Preview open: Enter = open that chat
-        if (state.previewChat) {
-            const chat = state.previewChat;
-            actions.setPreviewChat(null);
-            // Select the previewed chat
-            const idx = state.filteredChats.findIndex(c => c.id === chat.id);
-            if (idx >= 0) state.selectedChatIdx = idx;
-            resetMessageScroll();
-            await openSelectedChat();
+            dismissHelp();
             return;
         }
 
@@ -302,98 +251,9 @@ function registerKeys(context) {
         await openSelectedChat();
     });
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // SPACE — preview popup toggle
-    // ═══════════════════════════════════════════════════════════════════════
-
-    screen.key(['space'], () => {
-        if (state.mode !== 'normal') return;
-        if (state.showHelpPanel) return;
-        togglePreview();
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // SPLIT VIEW — Ctrl+W
-    // ═══════════════════════════════════════════════════════════════════════
-
-    screen.key(['C-w'], () => {
-        if (state.mode === 'insert') return;
-        actions.setSplitView();  // toggle
-        if (state.splitView) {
-            // Focus chat pane by default when entering split
-            focusChat();
-        }
-        screen.render();
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // TAB — cycle focus in split mode
-    // ═══════════════════════════════════════════════════════════════════════
-
-    screen.key(['tab'], () => {
-        if (state.mode !== 'normal') return;
-        if (state.viewMode === 'split') {
-            if (_focusPane === 'chat') {
-                focusMessage();
-            } else {
-                focusChat();
-            }
-            screen.render();
-        }
-    });
-
-    screen.key(['S-tab'], () => {
-        if (state.mode !== 'normal') return;
-        if (state.viewMode === 'split') {
-            if (_focusPane === 'message') {
-                focusChat();
-            } else {
-                focusMessage();
-            }
-            screen.render();
-        }
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Z — close chat, return to chat-list
-    // ═══════════════════════════════════════════════════════════════════════
-
-    screen.key(['S-z'], () => {
-        if (state.mode !== 'normal') return;
-        if (state.previewChat) {
-            actions.setPreviewChat(null);
-            return;
-        }
-        if (state.currentChatId || state.viewMode === 'chat-view') {
-            actions.selectChat(null, null);
-            actions.setViewMode('chat-list');
-            focusChat();
-            screen.render();
-        }
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // r — refresh messages
-    // ═══════════════════════════════════════════════════════════════════════
-
-    screen.key(['r'], async () => {
-        if (state.mode !== 'normal') return;
-        if (!state.currentChatId) return;
-        await refreshMessages();
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Ctrl+L — force full redraw
-    // ═══════════════════════════════════════════════════════════════════════
-
-    screen.key(['C-l'], () => {
-        screen.clearRegion(0, screen.width, 0, screen.height);
-        screen.render();
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // INSERT MODE
-    // ═══════════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════
+    // INSERT MODE (compose)
+    // ══════════════════════════════════════════════════════════════════════
 
     screen.key(['i'], async () => {
         if (state.mode !== 'normal') return;
@@ -402,13 +262,12 @@ function registerKeys(context) {
         }
         if (!state.currentChatId) return;
         actions.setShowHelp(false);
-        actions.setPreviewChat(null);
         actions.setMode('insert');
         inputBox.focus();
         screen.render();
     });
 
-    // Send via Ctrl-s
+    // Send via Ctrl-s from screen or inputBox
     screen.key(['C-s'], async () => {
         if (state.mode !== 'insert') return;
         await sendFromCompose();
@@ -419,6 +278,7 @@ function registerKeys(context) {
         await sendFromCompose();
     });
 
+    // Enter inside inputBox sends
     inputBox.key(['C-m'], async () => {
         if (state.mode !== 'insert') return;
         await sendFromCompose();
@@ -429,46 +289,18 @@ function registerKeys(context) {
         await sendFromCompose();
     });
 
-    // ═══════════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════
     // ESCAPE — back to normal
-    // ═══════════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════
 
     screen.key(['escape'], () => {
-        // Preview popup: dismiss
-        if (state.previewChat) {
-            actions.setPreviewChat(null);
-            return;
-        }
+        if (dismissHelp()) return;
 
-        // Help panel: dismiss
-        if (state.showHelpPanel) {
-            actions.setShowHelp(false);
-            if (!state.currentChatId) actions.setShowWelcome(true);
-            focusChat();
-            screen.render();
-            return;
-        }
-
-        if (state.mode === 'normal') {
-            // In chat-view: Esc returns to chat-list
-            if (state.viewMode === 'chat-view') {
-                actions.selectChat(null, null);
-                actions.setViewMode('chat-list');
-                focusChat();
-                screen.render();
-            }
-            return;
-        }
+        if (state.mode === 'normal') return;
 
         if (state.mode === 'insert') {
-            if (state.currentChatId && !state.splitView) {
-                // Return to chat-view
-                actions.setMode('normal');
-                focusMessage();
-            } else {
-                actions.setMode('normal');
-                focusChat();
-            }
+            inputBox.clearValue();
+            focusChat();
         }
         if (state.mode === 'search') {
             actions.setSearchQuery('');
@@ -482,9 +314,9 @@ function registerKeys(context) {
         screen.render();
     });
 
-    // ═══════════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════
     // SEARCH MODE  /
-    // ═══════════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════
 
     screen.key(['/'], () => {
         if (state.mode !== 'normal') return;
@@ -519,9 +351,9 @@ function registerKeys(context) {
         actions.moveChatSelection('up', 1);
     });
 
-    // ═══════════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════
     // COMMAND MODE  :
-    // ═══════════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════
 
     screen.key([':'], () => {
         if (state.mode !== 'normal') return;
@@ -532,7 +364,7 @@ function registerKeys(context) {
         screen.render();
     });
 
-    // ── Printable character routing ──────────────────────────────────────────
+    // ── Printable character routing ───────────────────────────────────────
     screen.on('keypress', (ch, key) => {
         if (!ch || key.ctrl || key.meta) return;
         if (ch.length !== 1) return;
@@ -549,18 +381,13 @@ function registerKeys(context) {
         }
     });
 
-    // ═══════════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════
     // HELP  &  QUIT
-    // ═══════════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════
 
     screen.key(['?', 'S-/'], () => {
         if (state.mode !== 'normal') return;
-        actions.setShowHelp(true);
-        // Show help in msgPanel regardless of viewMode
-        if (state.viewMode === 'chat-list') {
-            actions.setViewMode('chat-view');
-        }
-        focusMessage();
+        showHelp();
     });
 
     screen.key(['q'], () => {
@@ -569,7 +396,7 @@ function registerKeys(context) {
         process.exit(0);
     });
 
-    log.info('Keybindings registered (V2).');
+    log.info('Keybindings registered.');
 }
 
 module.exports = { registerKeys };

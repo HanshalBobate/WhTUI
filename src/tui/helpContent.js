@@ -1,64 +1,67 @@
 /**
- * helpContent.js  —  WHTUI V2
+ * helpContent.js
  *
  * Welcome screen, help text, and contextual hint strings for the status bar.
  */
 
+function getWelcomeText(chatCount) {
+    return [
+        '{bold}{green-fg}Welcome to whtui{/green-fg}{/bold}',
+        '',
+        '{grey-fg}A keyboard-driven WhatsApp client in your terminal.{/grey-fg}',
+        '',
+        `{bold}You have ${chatCount} chat${chatCount === 1 ? '' : 's'} loaded.{/bold}`,
+        '',
+        '{bold}Quick start{/bold}',
+        '  1. Use j/k or arrows to highlight a chat',
+        '  2. Press Enter to open it',
+        '  3. Press i to compose, type your message, press Enter to send',
+        '',
+        '{bold}Useful keys{/bold}',
+        '  {cyan-fg}/{cyan-fg}  search chats    {cyan-fg}?{/cyan-fg}  full help    {cyan-fg}q{/cyan-fg}  quit',
+        '',
+        '{grey-fg}Press ? anytime for the full key reference.{/grey-fg}',
+    ].join('\n');
+}
+
 function getHelpText() {
     return [
-        '{bold}{green-fg}whtui v2 — keyboard reference{/green-fg}{/bold}',
+        '{bold}{green-fg}whtui — keyboard reference{/green-fg}{/bold}',
         '',
-        '{bold}Navigation (Chat List){/bold}',
-        '  j / k / ↑ / ↓       Move selection up/down',
-        '  gg                   Jump to first chat',
-        '  G                    Jump to last chat',
-        '  Ctrl-d / Ctrl-u      Jump ¼ list down / up',
-        '  Enter                Open highlighted chat',
-        '  Space                Preview chat (popup)',
+        '{bold}Chat list (Normal mode){/bold}',
+        '  j / k / ↑ / ↓     Move selection',
+        '  Enter             Open highlighted chat',
+        '  gg                Jump to first chat',
+        '  G                 Jump to last chat',
+        '  Ctrl+d / Ctrl+u   Scroll chat list faster',
         '',
-        '{bold}Messages (Chat View){/bold}',
-        '  j / k                Scroll messages 3 lines',
-        '  J / K                Scroll messages 3 lines (always)',
-        '  Ctrl-d / Ctrl-u      Scroll half page',
-        '  Ctrl-f / Ctrl-b      Scroll full page',
-        '  gg / G               Jump to top / bottom',
-        '  i                    Compose reply (INSERT mode)',
-        '  r                    Refresh messages',
-        '  Esc / Z              Close chat → chat list',
+        '{bold}Messages (Normal mode){/bold}',
+        '  J / K             Scroll message pane',
+        '  i                 Compose a reply (Insert mode)',
         '',
-        '{bold}Insert Mode{/bold}',
-        '  Enter / Ctrl-s       Send message',
-        '  Esc                  Cancel',
+        '{bold}Insert mode (after pressing i){/bold}',
+        '  Enter             Send message',
+        '  Ctrl+Enter        Send message (alternate)',
+        '  Esc               Cancel and go back',
         '',
         '{bold}Search{/bold}',
-        '  /                    Start live search',
-        '  n / N                Next / prev result',
-        '  Enter                Open top result',
-        '  Esc                  Clear search',
+        '  /                 Start search, then type a name',
+        '  Enter             Open first match',
+        '  Esc               Clear search',
         '',
-        '{bold}Commands (:){/bold}',
-        '  :reload              Refresh chat list',
-        '  :refresh             Refresh open chat messages',
-        '  :open <name>         Open chat by name',
-        '  :search <term>       Search chats',
-        '  :unread              Show unread chats only',
-        '  :pinned              Show pinned chats only',
-        '  :groups              Show groups only',
-        '  :all                 Show all chats (clear filter)',
-        '  :compact             Toggle compact message style',
-        '  :split               Toggle split view',
-        '  :theme <name>        Switch color theme',
-        '  :logout              Logout and wipe session',
-        '  :q                   Quit',
+        '{bold}Commands{/bold}',
+        '  :reload           Refresh chat list',
+        '  :refresh          Refresh open chat messages',
+        '  :open <name>      Open chat by name',
+        '  :search <term>    Search chats',
+        '  :help             Show this screen',
+        '  :q                Quit',
         '',
-        '{bold}Layout{/bold}',
-        '  Ctrl-W               Toggle 30/70 split view',
-        '  Tab / Shift-Tab      Cycle pane focus (split mode)',
-        '  Ctrl-L               Force redraw',
+        '{bold}Other{/bold}',
+        '  ?                 Show this help',
+        '  q                 Quit',
         '',
-        '{bold}Themes:{/bold} catppuccin · tokyonight · dracula · gruvbox · nord',
-        '',
-        '{grey-fg}Press Esc or Enter to close help{/grey-fg}',
+        '{grey-fg}Press Esc to close help{/grey-fg}',
     ].join('\n');
 }
 
@@ -69,31 +72,51 @@ function getHelpText() {
  * @returns {string}
  */
 function getContextHints(s) {
-    if (s.isLoading) return '';  // Spinner label shown in pill instead
+    if (s.isLoading) return s.loadingText || 'Starting...';
 
     switch (s.mode) {
         case 'insert':
-            return 'Enter send  Esc cancel';
+            return 'Enter send · Esc cancel';
         case 'search':
-            return 'type to filter  n/N cycle  Enter open  Esc clear';
+            return 'type to filter · Enter open · Esc clear';
         case 'command':
-            return 'Enter run  Esc cancel';
+            return 'Enter run · Esc cancel';
         default:
             if (s.showHelpPanel) return 'Esc close help';
-
-            if (s.viewMode === 'chat-view' || (s.viewMode === 'split' && s.currentChatId)) {
-                return 'j/k scroll  i reply  r refresh  Z close  / search  ? help';
+            if (s.currentChatId) {
+                return 'j/k select · Enter open · i reply · J/K scroll · / search · ? help';
             }
-
-            if (s.viewMode === 'split') {
-                return 'Tab focus  j/k nav  Enter open  Space preview  Ctrl-W unsplit';
-            }
-
-            return 'j/k nav  Enter open  Space preview  / search  : cmd  ? help  q quit';
+            return 'j/k select · Enter open · / search · ? help · q quit';
     }
 }
 
+function getChatPreview(chat) {
+    if (!chat) {
+        return '\n{center}{grey-fg}No chats loaded{/grey-fg}{/center}';
+    }
+
+    const lastMsg = chat.lastMessage
+        ? chat.lastMessage
+        : '{grey-fg}(no preview){/grey-fg}';
+
+    return [
+        '',
+        `{bold}{green-fg}${chat.title}{/green-fg}{/bold}`,
+        chat.unreadCount > 0
+            ? `{green-fg}${chat.unreadCount} unread message${chat.unreadCount === 1 ? '' : 's'}{/green-fg}`
+            : '{grey-fg}Up to date{/grey-fg}',
+        '',
+        '{grey-fg}Last message:{/grey-fg}',
+        lastMsg,
+        '',
+        '{center}{cyan-fg}Press Enter to open this chat{/cyan-fg}{/center}',
+        '{center}{grey-fg}Press ? for keyboard help{/grey-fg}{/center}',
+    ].join('\n');
+}
+
 module.exports = {
+    getWelcomeText,
     getHelpText,
     getContextHints,
+    getChatPreview,
 };

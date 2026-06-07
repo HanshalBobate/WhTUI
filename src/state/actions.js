@@ -72,7 +72,6 @@ function setChats(chats) {
 /**
  * Open a chat by its id string.
  * Clears the message list (messages will load asynchronously).
- * Switches viewMode to 'chat-view' (unless split is active).
  *
  * @param {string} chatId
  * @param {string} title
@@ -83,10 +82,6 @@ function selectChat(chatId, title) {
     state.messages         = [];
     state.showWelcome      = false;
     state.showHelpPanel    = false;
-    state.previewChat      = null;
-    if (chatId && !state.splitView) {
-        state.viewMode = 'chat-view';
-    }
     log.info(`selectChat: ${chatId}`);
     _render();
 }
@@ -250,122 +245,21 @@ function updateUnread(chatId, unreadCount) {
     }
 }
 
-// ─── V2 Actions ───────────────────────────────────────────────────────────────
-
-/**
- * Switch the primary view mode.
- * @param {'chat-list'|'chat-view'|'split'} mode
- */
-function setViewMode(mode) {
-    state.viewMode = mode;
-    _render();
-}
-
-/**
- * Toggle or set the 30/70 split view (Ctrl+W).
- * @param {boolean} [on]
- */
-function setSplitView(on) {
-    state.splitView = typeof on === 'boolean' ? on : !state.splitView;
-    if (state.splitView) {
-        state.viewMode = 'split';
-    } else {
-        // Return to the appropriate single-pane mode
-        state.viewMode = state.currentChatId ? 'chat-view' : 'chat-list';
-    }
-    _render();
-}
-
-/**
- * Show or hide the Space-key chat preview popup.
- * @param {object|null} chat  The chat to preview, or null to dismiss
- */
-function setPreviewChat(chat) {
-    state.previewChat = chat || null;
-    _render();
-}
-
-/**
- * Set the filter mode for the chat list.
- * @param {'all'|'unread'|'pinned'|'groups'} mode
- */
-function setFilterMode(mode) {
-    state.filterMode = mode;
-    _applySearch();
-    state.selectedChatIdx = 0;
-    _render();
-}
-
-/**
- * Toggle compact message rendering mode.
- * @param {boolean} [on]
- */
-function setCompactMessages(on) {
-    state.compactMessages = typeof on === 'boolean' ? on : !state.compactMessages;
-    _render();
-}
-
-/**
- * Update the current startup splash step text.
- * Pass null to mark the current step as complete (✓) without ending the splash.
- * @param {string|null} text  Step description, or null to mark current step done
- */
-function setStartupStep(text) {
-    state.startupStep = text;
-    _render();
-}
-
-/**
- * Mark startup as fully complete — hides the splash and shows the main UI.
- */
-function setStartupDone() {
-    state.startupStep = null;
-    state.startupDone = true;
-    _render();
-}
-
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
 /**
- * Filter state.chats → state.filteredChats using the current searchQuery AND filterMode.
+ * Filter state.chats → state.filteredChats using the current searchQuery.
  * Uses Fuse for fuzzy matching; falls back to the full list when query is empty.
  */
 function _applySearch() {
-    let base = state.chats;
-
-    // Apply filter mode first
-    switch (state.filterMode) {
-        case 'unread':
-            base = base.filter(c => c.unreadCount > 0);
-            break;
-        case 'pinned':
-            base = base.filter(c => c.pinned);
-            break;
-        case 'groups':
-            // Groups typically have a '@g.us' id suffix in WhatsApp
-            base = base.filter(c =>
-                (c.id && c.id.includes('@g.us')) ||
-                (c.id && c.id.includes('group'))
-            );
-            break;
-        default:
-            // 'all' — no filter
-            break;
-    }
-
     if (!state.searchQuery || state.searchQuery.trim() === '') {
-        state.filteredChats = base;
+        state.filteredChats = state.chats;
         return;
     }
-
-    // Fuzzy search within the filtered base
-    const localFuse = new Fuse(base, {
-        keys:              ['title'],
-        threshold:         0.4,
-        includeScore:      false,
-        minMatchCharLength: 1,
-    });
-    const results = localFuse.search(state.searchQuery);
+    if (!_fuse) {
+        _rebuildFuse();
+    }
+    const results = _fuse.search(state.searchQuery);
     state.filteredChats = results.map(r => r.item);
 }
 
@@ -385,12 +279,4 @@ module.exports = {
     setShowHelp,
     setShowWelcome,
     setQrDisplay,
-    // V2
-    setViewMode,
-    setSplitView,
-    setPreviewChat,
-    setFilterMode,
-    setCompactMessages,
-    setStartupStep,
-    setStartupDone,
 };

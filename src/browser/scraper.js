@@ -165,7 +165,7 @@ async function scrapeChats(page) {
                     title,
                     unreadCount,
                     lastMessage,
-                    lastTimestamp: 0,
+                    lastTimestamp: Date.now(),
                     timeLabel,
                     rowIndex: index,
                     pinned,
@@ -262,21 +262,15 @@ async function scrapeMessages(page) {
                 const copyableEl = row.querySelector('[data-pre-plain-text]');
                 if (copyableEl) {
                     const raw = copyableEl.getAttribute('data-pre-plain-text') || '';
-                    // Format: "[11:04 PM, 6/6/2026] Name: "
-                    const match = raw.match(/\[([^,\]]+),\s*([^\]]+)\]/);
+                    // Format: "[HH:MM, DD/MM/YYYY] Name: "
+                    const match = raw.match(/\[(\d+:\d+),\s*(\d+\/\d+\/\d+)\]/);
                     if (match) {
-                        const [_, timeStr, dateStr] = match;
-                        let dt = new Date(`${dateStr} ${timeStr}`);
-                        if (isNaN(dt.getTime())) {
-                            // Try swapping day/month if it failed (e.g. DD/MM/YYYY)
-                            const parts = dateStr.split(/[\/\-\.]/);
-                            if (parts.length === 3) {
-                                dt = new Date(`${parts[1]}/${parts[0]}/${parts[2]} ${timeStr}`);
-                            }
-                        }
-                        if (!isNaN(dt.getTime())) {
-                            timestamp = dt.getTime();
-                        }
+                        // Convert to epoch
+                        const [_, time, date] = match;
+                        const [d, m, y] = date.split('/').map(Number);
+                        const [h, min]  = time.split(':').map(Number);
+                        const dt = new Date(y, m - 1, d, h, min);
+                        timestamp = dt.getTime();
                     }
                 }
                 if (!timestamp) timestamp = Date.now();
