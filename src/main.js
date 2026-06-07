@@ -1,21 +1,19 @@
 /**
- * main.js
+ * main.js  —  WHTUI V2
  *
  * Application orchestrator — the single file that wires everything together.
  *
  * Startup sequence:
- *   1.  Initialize TUI screen (immediately shows UI shell)
- *   2.  Start spinner  "Launching browser..."
- *   3.  Launch persistent Chromium via browser.js
- *   4.  Detect login state via session.js
- *      4a. Not logged in → "Waiting for QR scan..." → poll for auth
- *      4b. Already logged in → proceed
- *   5.  "Loading chats..."
- *   6.  Scrape initial chat list via scraper.js
- *   7.  Inject MutationObservers via observer.js
- *   8.  Register all keybindings
- *   9.  Start connection heartbeat
- *  10.  "Ready."
+ *   1.  Initialize TUI screen (immediately shows startup splash)
+ *   2.  Launch persistent Chromium via browser.js
+ *   3.  Detect login state via session.js
+ *      3a. Not logged in → show QR code → poll for auth
+ *      3b. Already logged in → proceed
+ *   4.  Scrape initial chat list via scraper.js
+ *   5.  Inject MutationObservers via observer.js
+ *   6.  Register all keybindings
+ *   7.  Start connection heartbeat + live refresh
+ *   8.  Mark startupDone → splash hides, main UI renders
  */
 
 'use strict';
@@ -23,10 +21,10 @@
 const path = require('path');
 const fs   = require('fs');
 
-// ── Utilities (must load before anything that logs) ────────────────────────
+// ── Utilities (must load before anything that logs) ──────────────────────────
 const log = require('./utils/logger');
 
-log.info('=== WHTUI starting ===');
+log.info('=== WHTUI V2 starting ===');
 
 // ── Browser layer ─────────────────────────────────────────────────────────────
 const browser  = require('./browser/browser');
@@ -46,14 +44,12 @@ const actions = require('./state/actions');
 // ── TUI ───────────────────────────────────────────────────────────────────────
 // Import screen FIRST to initialize blessed before any widgets are created
 const screen   = require('./tui/screen');
-const { chatList, messageBox, inputBox } = require('./tui/layout');
-const { render, renderStatusBar }        = require('./tui/renderer');
-const { startSpinner, stopSpinner }      = require('./tui/statusbar');
-const { registerKeys }                   = require('./tui/keybindings');
+const { chatPanel, msgPanel, inputBox } = require('./tui/layout');
+const { render, renderStatusBar, recordStartupStep } = require('./tui/renderer');
+const { startSpinner, stopSpinner }                   = require('./tui/statusbar');
+const { registerKeys }                                = require('./tui/keybindings');
 
 // ── Wire up the render function into actions ──────────────────────────────────
-// We pass a wrapper that includes the current spinner frame.
-// The spinner manager updates this reference on each tick.
 let _currentSpinnerFrame = null;
 
 actions.setRenderFn(() => {
@@ -70,11 +66,11 @@ actions.setRenderFn(() => {
 
 // ─── Spinner wrapper ──────────────────────────────────────────────────────────
 
-/** While true, withSpinner keeps the global loading flag set between steps. */
 let _startupPhase = true;
 
 /**
- * Run an async operation while showing a spinner.
+ * Run an async operation while showing a spinner on the startup splash
+ * and in the status bar.
  *
  * @param {string}   text      Spinner label
  * @param {Function} asyncFn   async () → result
@@ -82,6 +78,7 @@ let _startupPhase = true;
  */
 async function withSpinner(text, asyncFn) {
     actions.setLoading(true, text);
+    actions.setStartupStep(text);
 
     const stop = startSpinner(text, (frame) => {
         _currentSpinnerFrame = frame;
@@ -95,15 +92,18 @@ async function withSpinner(text, asyncFn) {
     } finally {
         stopSpinner(stop);
         _currentSpinnerFrame = null;
-        if (!_startupPhase) {
+        // Mark this step as ✓ complete in the splash (does NOT end the splash)
+        if (_startupPhase) {
+            actions.setStartupStep(null);
+        } else {
             actions.setLoading(false);
         }
     }
 }
 
-// ─── Chat actions (passed to keybindings) ─────────────────────────────────────
+// ─── Chat actions ─────────────────────────────────────────────────────────────
 
-let _page = null;  // set after browser launch
+let _page = null;
 
 /**
  * Scrape and load messages for the currently selected chat.
@@ -129,7 +129,11 @@ async function openSelectedChat() {
     });
 
     actions.setConnectionStatus('ONLINE');
-    chatList.focus();
+
+    // Focus the message panel if not in split mode
+    if (!state.splitView) {
+        msgPanel.focus();
+    }
 }
 
 /**
@@ -139,8 +143,6 @@ async function logout() {
     actions.setLoading(true, 'Logging out and clearing session data...');
     try {
         await browser.close();
-        const fs = require('fs');
-        const path = require('path');
         const profilePath = path.resolve(__dirname, '../storage/browser-profile');
         if (fs.existsSync(profilePath)) {
             fs.rmSync(profilePath, { recursive: true, force: true });
@@ -148,7 +150,6 @@ async function logout() {
     } catch (err) {
         log.error('Error during logout', { error: err.message });
     }
-    // Clean up screen before exiting
     require('./tui/screen').destroy();
     console.log('\n\x1b[32mSuccessfully logged out and wiped session data.\x1b[0m');
     console.log('Run the app again to scan a new QR code.\n');
@@ -206,19 +207,15 @@ async function openChatByTitle(title) {
         log.warn(`openChatByTitle: no match for "${title}"`);
         return;
     }
-    const originalIdx = state.filteredChats.indexOf(chat);
-    if (originalIdx >= 0) {
-        actions.moveChatSelection('down', 0); // no-op, just ensure state is set
-        state.selectedChatIdx = originalIdx;
+    const idx = state.filteredChats.indexOf(chat);
+    if (idx >= 0) {
+        state.selectedChatIdx = idx;
     }
     await openSelectedChat();
 }
 
 // ─── Observer event handlers ──────────────────────────────────────────────────
 
-/**
- * Called by MutationObserver when a new message arrives in the open chat.
- */
 async function onNewMessage() {
     if (!state.currentChatId) return;
     log.debug('onNewMessage: re-scraping messages');
@@ -273,10 +270,6 @@ function startLiveRefresh() {
 
 // ─── Connection heartbeat ─────────────────────────────────────────────────────
 
-/**
- * Poll connection status every 15 seconds as a lightweight safety net.
- * The MutationObserver covers most changes; this catches anything missed.
- */
 function startHeartbeat() {
     setInterval(async () => {
         try {
@@ -293,6 +286,7 @@ function startHeartbeat() {
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 async function main() {
+    // Initial render — shows startup splash immediately
     actions.setShowWelcome(false);
     actions.setLoading(true, 'Starting whtui...');
     render();
@@ -339,7 +333,7 @@ async function main() {
             actions.setLoading(true, 'Authenticated. Loading chats...');
         });
 
-        // 3. Wait for ready state (blocks until authenticated + chat list loaded)
+        // 3. Wait for ready state
         await session.waitForReady();
 
         // 4. Scrape initial chat list
@@ -367,31 +361,38 @@ async function main() {
             logout,
         });
 
-        // 7. Give keyboard focus to the chat list
-        chatList.focus();
+        // 7. Focus chat panel
+        chatPanel.focus();
 
-        // 8. Start heartbeat + live refresh polling
+        // 8. Start heartbeat + live refresh
         startHeartbeat();
         startLiveRefresh();
 
-        // 9. Final ready state
+        // 9. Final ready state — hides startup splash, shows main UI
         _startupPhase = false;
         actions.setQrDisplay(null);
         actions.setLoading(false);
-        actions.setShowWelcome(chats.length > 0);
         actions.setConnectionStatus('ONLINE');
-        log.info('WHTUI ready.');
 
-        // Draw once more cleanly
+        // Mark startup complete — hides splash and renders main UI
+        actions.setStartupDone();
+
+        // Start in chat-list mode
+        state.viewMode = 'chat-list';
+
+        log.info('WHTUI V2 ready.');
         render();
 
     } catch (err) {
         _startupPhase = false;
+        state.startupDone = true;
         actions.setLoading(false);
         actions.setQrDisplay(null);
         log.error('Fatal startup error', { error: err.message, stack: err.stack });
-        // Show error in TUI rather than crashing silently
-        messageBox.setContent(
+
+        // Show error in message panel
+        state.viewMode = 'chat-view';
+        msgPanel.setContent(
             `{red-fg}{bold}Startup Error{/bold}{/red-fg}\n\n${err.message}\n\n` +
             `{grey-fg}Check logs in storage/logs/ for details.{/grey-fg}\n\n` +
             `{grey-fg}Press q to quit.{/grey-fg}`
