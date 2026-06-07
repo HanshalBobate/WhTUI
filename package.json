@@ -3,6 +3,9 @@
     "version": "2.0.0",
     "description": "WhatsApp Terminal UI — Playwright DOM Mirroring",
     "main": "index.js",
+    "bin": {
+        "whtui": "./index.js"
+    },
     "type": "commonjs",
     "scripts": {
         "start": "node index.js",
