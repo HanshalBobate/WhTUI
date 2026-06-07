@@ -19,12 +19,23 @@ const log    = require('../utils/logger');
 // Lazy reference to the render function (set by main.js on startup)
 let _render = () => {};
 
+// Lazy reference to resetMessageScroll (set after renderer loads)
+let _resetMsgScroll = () => {};
+
 /**
  * Wire up the render callback.  Called once from main.js after TUI is ready.
  * @param {Function} renderFn
  */
 function setRenderFn(renderFn) {
     _render = renderFn;
+}
+
+/**
+ * Wire up the resetMessageScroll callback from the renderer.
+ * @param {Function} fn
+ */
+function setResetMsgScrollFn(fn) {
+    _resetMsgScroll = fn;
 }
 
 // ─── Fuse.js instance (rebuilt when chats change) ─────────────────────────────
@@ -81,6 +92,8 @@ function selectChat(chatId, title) {
     state.currentChatId    = chatId;
     state.currentChatTitle = title || '';
     state.messages         = [];
+    state.msgScrollOffset  = 0;
+    _resetMsgScroll();          // bust the renderer's line cache
     state.showWelcome      = false;
     state.showHelpPanel    = false;
     state.previewChat      = null;
@@ -371,6 +384,7 @@ function _applySearch() {
 
 module.exports = {
     setRenderFn,
+    setResetMsgScrollFn,
     setChats,
     selectChat,
     setMessages,

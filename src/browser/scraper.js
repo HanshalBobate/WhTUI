@@ -69,6 +69,24 @@ async function scrapeChats(page) {
                 return null;
             }
 
+            function qsText(root, sels) {
+                const el = qs(root, sels);
+                if (!el) return '';
+                let text = '';
+                const walk = (node) => {
+                    if (node.nodeType === 3) text += node.textContent;
+                    else if (node.nodeType === 1) {
+                        if (node.tagName.toLowerCase() === 'img' && node.hasAttribute('alt')) {
+                            text += node.getAttribute('alt');
+                        } else {
+                            for (const child of node.childNodes) walk(child);
+                        }
+                    }
+                };
+                walk(el);
+                return text.trim();
+            }
+
             function parseUnread(row) {
                 const badge = row.querySelector('[data-testid="icon-unread-count"]');
                 if (badge) {
@@ -133,9 +151,8 @@ async function scrapeChats(page) {
             }
 
             function parseLastMessage(row) {
-                const el = qs(row, SEL.chatList.lastMessage);
-                if (!el) return '';
-                const text = el.textContent.trim();
+                const text = qsText(row, SEL.chatList.lastMessage);
+                if (!text) return '';
                 if (/unread message/i.test(text)) return '';
                 return text;
             }
@@ -203,7 +220,24 @@ async function scrapeMessages(page) {
 
             function qsText(root, sels) {
                 const el = qs(root, sels);
-                return el ? el.textContent.trim() : '';
+                if (!el) return '';
+                
+                let text = '';
+                const walk = (node) => {
+                    if (node.nodeType === 3) { // TEXT_NODE
+                        text += node.textContent;
+                    } else if (node.nodeType === 1) { // ELEMENT_NODE
+                        if (node.tagName.toLowerCase() === 'img' && node.hasAttribute('alt')) {
+                            text += node.getAttribute('alt');
+                        } else {
+                            for (const child of node.childNodes) {
+                                walk(child);
+                            }
+                        }
+                    }
+                };
+                walk(el);
+                return text.trim();
             }
 
             // Find message container
@@ -220,6 +254,9 @@ async function scrapeMessages(page) {
                 rows = Array.from(container.querySelectorAll(s));
                 if (rows.length > 0) break;
             }
+
+            let lastValidTimestamp = Date.now();
+            let lastIncomingSender = 'contact';
 
             return rows.map((row) => {
                 // ID
@@ -250,8 +287,12 @@ async function scrapeMessages(page) {
                         const senderEl = qs(row, SEL.messages.senderName);
                         if (senderEl) sender = senderEl.textContent.trim();
                     }
-                    // Last resort
-                    if (!sender) sender = 'contact';
+                    
+                    if (sender) {
+                        lastIncomingSender = sender;
+                    } else {
+                        sender = lastIncomingSender;
+                    }
                 }
 
                 // Text
@@ -279,7 +320,25 @@ async function scrapeMessages(page) {
                         }
                     }
                 }
-                if (!timestamp) timestamp = Date.now();
+                
+                if (!timestamp) {
+                    // Try to parse the visible time from the DOM
+                    const tsText = qsText(row, SEL.messages.timestamp);
+                    if (tsText && lastValidTimestamp) {
+                        const d = new Date(lastValidTimestamp);
+                        const dateString = `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+                        let dt = new Date(`${dateString} ${tsText}`);
+                        if (!isNaN(dt.getTime())) {
+                            timestamp = dt.getTime();
+                        }
+                    }
+                }
+
+                if (!timestamp) {
+                    timestamp = lastValidTimestamp;
+                } else {
+                    lastValidTimestamp = timestamp;
+                }
 
                 // Quoted message
                 let quoted = null;
