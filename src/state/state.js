@@ -59,6 +59,9 @@ const state = {
     compactMessages: false,
     startupStep:     null,
     startupDone:     false,
+
+    // Manual message scroll (line offset from bottom)
+    msgScrollOffset: 0,
 };
 
 module.exports = state;

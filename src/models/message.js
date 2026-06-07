@@ -82,7 +82,7 @@ class Message {
      * @returns {string}
      */
     displayText() {
-        return this.text || this.mediaLabel() || '[message]';
+        return this.text || this.mediaLabel() || '';
     }
 
     /**

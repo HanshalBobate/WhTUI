@@ -45,7 +45,7 @@ const actions = require('./state/actions');
 // Import screen FIRST to initialize blessed before any widgets are created
 const screen   = require('./tui/screen');
 const { chatPanel, msgPanel, inputBox } = require('./tui/layout');
-const { render, renderStatusBar, recordStartupStep } = require('./tui/renderer');
+const { render, renderStatusBar, recordStartupStep, resetMessageScroll } = require('./tui/renderer');
 const { startSpinner, stopSpinner }                   = require('./tui/statusbar');
 const { registerKeys }                                = require('./tui/keybindings');
 
@@ -55,6 +55,7 @@ let _currentSpinnerFrame = null;
 actions.setRenderFn(() => {
     render(_currentSpinnerFrame);
 });
+actions.setResetMsgScrollFn(resetMessageScroll);
 
 // ── Storage dirs ──────────────────────────────────────────────────────────────
 [

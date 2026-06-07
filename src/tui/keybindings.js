@@ -73,7 +73,7 @@ const { chatPanel, msgPanel, inputBox, commandBar, setFocusBorder } = require('.
 const actions = require('../state/actions');
 const state   = require('../state/state');
 const { executeCommand } = require('./commandbar');
-const { resetMessageScroll } = require('./renderer');
+const { render, resetMessageScroll } = require('./renderer');
 const log     = require('../utils/logger');
 
 // gg double-tap detection
@@ -98,6 +98,13 @@ function focusMessage() {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Scroll the message pane by `delta` lines (positive = down/towards newer, negative = up/towards older). */
+function _scrollMsg(delta) {
+    state.msgScrollOffset = Math.max(0, state.msgScrollOffset - delta);
+    screen.realloc();  // Force blessed to rewrite every terminal cell — eliminates ghost chars
+    render();
+}
 
 /** True when j/k should navigate the message pane (not the chat list). */
 function _inMessagePane() {
@@ -151,25 +158,21 @@ function registerKeys(context) {
 
     screen.key(['j', 'down'], () => {
         if (state.mode !== 'normal') return;
-        if (state.previewChat) return;  // ignore nav while preview open
-
+        if (state.previewChat) return;
         if (_inMessagePane()) {
-            msgPanel.scroll(3);
-            screen.render();
+            _scrollMsg(3);
         } else {
-            actions.moveChatSelection('down', 1);
+            actions.moveChatSelection('up', 1);
         }
     });
 
     screen.key(['k', 'up'], () => {
         if (state.mode !== 'normal') return;
         if (state.previewChat) return;
-
         if (_inMessagePane()) {
-            msgPanel.scroll(-3);
-            screen.render();
+            _scrollMsg(-3);
         } else {
-            actions.moveChatSelection('up', 1);
+            actions.moveChatSelection('down', 1);
         }
     });
 
@@ -177,63 +180,54 @@ function registerKeys(context) {
     screen.key(['C-d'], () => {
         if (state.mode !== 'normal') return;
         if (_inMessagePane()) {
-            const half = Math.max(3, Math.floor((msgPanel.height) / 2));
-            msgPanel.scroll(half);
-            screen.render();
-        } else {
-            const step = Math.max(1, Math.floor(state.filteredChats.length / 4));
-            actions.moveChatSelection('down', step);
-        }
-    });
-
-    screen.key(['C-u'], () => {
-        if (state.mode !== 'normal') return;
-        if (_inMessagePane()) {
-            const half = Math.max(3, Math.floor((msgPanel.height) / 2));
-            msgPanel.scroll(-half);
-            screen.render();
+            _scrollMsg(Math.max(3, Math.floor(msgPanel.height / 2)));
         } else {
             const step = Math.max(1, Math.floor(state.filteredChats.length / 4));
             actions.moveChatSelection('up', step);
         }
     });
 
-    // Page scroll in message pane
+    screen.key(['C-u'], () => {
+        if (state.mode !== 'normal') return;
+        if (_inMessagePane()) {
+            _scrollMsg(-Math.max(3, Math.floor(msgPanel.height / 2)));
+        } else {
+            const step = Math.max(1, Math.floor(state.filteredChats.length / 4));
+            actions.moveChatSelection('down', step);
+        }
+    });
+
+    // Page scroll
     screen.key(['C-f', 'pagedown'], () => {
         if (state.mode !== 'normal') return;
-        const page = Math.max(3, msgPanel.height - 2);
-        msgPanel.scroll(page);
-        screen.render();
+        _scrollMsg(Math.max(3, msgPanel.height - 2));
     });
 
     screen.key(['C-b', 'pageup'], () => {
         if (state.mode !== 'normal') return;
-        const page = Math.max(3, msgPanel.height - 2);
-        msgPanel.scroll(-page);
-        screen.render();
+        _scrollMsg(-Math.max(3, msgPanel.height - 2));
     });
 
-    // Shift+J / Shift+K — fine scroll always goes to message pane
+    // Shift+J / Shift+K
     screen.key(['J'], () => {
         if (state.mode !== 'normal') return;
-        msgPanel.scroll(3);
-        screen.render();
+        _scrollMsg(3);
     });
 
     screen.key(['K'], () => {
         if (state.mode !== 'normal') return;
-        msgPanel.scroll(-3);
-        screen.render();
+        _scrollMsg(-3);
     });
 
-    // gg — jump to first (chat or message top)
+    // gg — jump to top
     screen.key(['g'], () => {
         if (state.mode !== 'normal') return;
         const now = Date.now();
         if (now - _lastGTime <= GG_WINDOW_MS) {
             if (_inMessagePane()) {
-                msgPanel.setScrollPerc(0);
-                screen.render();
+                state.msgScrollOffset = 999999;  // will be clamped to max
+                screen.realloc();
+                render();
             } else {
                 actions.jumpChatSelection('first');
             }
@@ -243,12 +237,13 @@ function registerKeys(context) {
         }
     });
 
-    // G — jump to last (chat or message bottom)
+    // G — jump to bottom
     screen.key(['S-g'], () => {
         if (state.mode !== 'normal') return;
         if (_inMessagePane()) {
-            msgPanel.setScrollPerc(100);
-            screen.render();
+            state.msgScrollOffset = 0;
+            screen.realloc();
+            render();
         } else {
             actions.jumpChatSelection('last');
         }

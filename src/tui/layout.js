@@ -78,7 +78,7 @@ const chatPanel = blessed.list({
     scrollable:   true,
     alwaysScroll: true,
     cleanSides:   true,    // ← prevents trailing chars during scroll
-    mouse:        true,
+    mouse:        false,
     keys:         false,
     vi:           false,
 
@@ -118,25 +118,19 @@ const msgPanel = blessed.box({
     height: `100%-${TOPBAR_H + STATUSBAR_H}`,
 
     border: { type: 'line' },
-    wrap:   true,
+    wrap:   false,
     style: {
         bg:     THEME.messages.bg,
         fg:     THEME.messages.fg,
         border: { fg: THEME.border },    // dim until focused
     },
 
-    scrollable:   true,
-    alwaysScroll: true,
-    cleanSides:   true,    // ← prevents trailing chars during scroll
-    mouse:        true,
-    keys:         true,
-    vi:           false,   // We handle scrolling ourselves
-
-    scrollbar: {
-        ch:    '▐',
-        track: { bg: THEME.bg },
-        style: { inverse: false, fg: THEME.surface1 || THEME.fgMuted },
-    },
+    scrollable:   false,
+    alwaysScroll: false,
+    cleanSides:   true,
+    mouse:        false,
+    keys:         false,
+    vi:           false,
 });
 
 // ── Status bar ────────────────────────────────────────────────────────────────
@@ -191,7 +185,7 @@ const inputBox = blessed.textarea({
     },
 
     inputOnFocus: true,
-    mouse:        true,
+    mouse:        false,
     hidden:       true,
     content:      '',
 });
@@ -208,7 +202,7 @@ const previewBox = blessed.box({
     height: '50%',
 
     border: { type: 'line' },
-    wrap:   true,
+    wrap:   false,
     style: {
         bg:     THEME.bgPanel,
         fg:     THEME.fg,

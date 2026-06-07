@@ -23,7 +23,7 @@ const { THEME } = require('./theme');
 const state   = require('../state/state');
 const {
     formatChatRow, formatMessage, formatMessageCompact,
-    formatGroupedMessages, truncate, stripTags, formatTimeAgo,
+    formatGroupedMessages, truncate, stripTags, formatTimeAgo, wrapLine,
 } = require('../utils/formatters');
 const { dateSeparator, sameDay } = require('../utils/time');
 const {
@@ -36,21 +36,50 @@ const {
 // Maximum messages to render at once (virtualization ceiling)
 const MAX_MESSAGES = 200;
 
+/**
+ * Pad a tagged line with trailing spaces to fill `width` visible columns.
+ * Forces blessed to overwrite every terminal cell in the row, preventing
+ * ghost characters from old renders from persisting.
+ *
+ * @param {string} line   Blessed-tagged line
+ * @param {number} width  Panel inner width
+ * @returns {string}
+ */
+function _padLine(line, width) {
+    if (!line) return ' '.repeat(width);
+    const visible = stripTags(line).length;
+    const pad = Math.max(0, width - visible);
+    return line + ' '.repeat(pad);
+}
+
+/**
+ * Center tagged text within `width` columns using spaces (no {center} tag needed).
+ * Works correctly with wrap:false.
+ */
+function _centerLine(taggedText, width) {
+    const visLen = stripTags(taggedText).length;
+    if (visLen >= width) return taggedText;
+    const left  = Math.floor((width - visLen) / 2);
+    const right = width - visLen - left;
+    return ' '.repeat(left) + taggedText + ' '.repeat(right);
+}
+
 // Startup splash steps accumulator
 const _startupSteps = [];  // { text, done }
 let   _startupCurrentText = null;
 
-// ── Message scroll tracking ───────────────────────────────────────────────────
-let _msgSig = '';
+// ── Message scroll state (manual — we manage offset ourselves) ────────────────
 
-function _getMessageSig(msgs) {
-    if (!msgs.length) return '';
-    const last = msgs[msgs.length - 1];
-    return `${msgs.length}:${last.id}:${last.text}`;
-}
+/** Full rendered line array from the last build — we slice into it for display. */
+let _allLines = [];
 
+/**
+ * Reset scroll to bottom (called when switching chats or new messages arrive).
+ * Also wipes the cached line array.
+ */
 function resetMessageScroll() {
-    _msgSig = '';
+    state.msgScrollOffset = 0;
+    _allLines = [];
 }
 
 // ── Startup splash ────────────────────────────────────────────────────────────
@@ -92,7 +121,7 @@ function renderStartup(spinnerFrame) {
     // Build lines
     const lines = [];
     lines.push('');
-    lines.push('{center}{bold}{green-fg}whtui{/green-fg}{/bold}{center}');
+    lines.push(_centerLine('{bold}{green-fg}whtui{/green-fg}{/bold}', W));
     lines.push('');
 
     for (const step of _startupSteps) {
@@ -212,9 +241,9 @@ function renderMessages(spinnerFrame) {
     // ── Loading ─────────────────────────────────────────────────────────────
     if (state.isLoading) {
         const spin = spinnerFrame ? `{yellow-fg}${spinnerFrame}{/yellow-fg} ` : '';
-        msgPanel.setContent(
-            `\n{center}${spin}{yellow-fg}${state.loadingText}{/yellow-fg}{/center}\n`
-        );
+        const W2 = getMsgPanelInnerWidth();
+        const loadLine = `${spin}{yellow-fg}${state.loadingText}{/yellow-fg}`;
+        msgPanel.setContent('\n' + _centerLine(loadLine, W2) + '\n');
         return;
     }
 
@@ -237,96 +266,101 @@ function renderMessages(spinnerFrame) {
         return;
     }
 
-    // ── Welcome / no chat selected ───────────────────────────────────────────
+    // ── Welcome / no chat selected ───────────────────────────────────────────────
     if (!state.currentChatId) {
         const n = state.chats.length;
+        const W = getMsgPanelInnerWidth();
         msgPanel.setContent([
-            '',
-            '{center}{bold}{green-fg}whtui{/green-fg}{/bold}{/center}',
-            '',
-            `{center}{grey-fg}${n} chat${n === 1 ? '' : 's'} loaded{/grey-fg}{/center}`,
-            '',
-            '{center}j/k navigate  ·  Enter open  ·  / search  ·  Space preview  ·  ? help{/center}',
-            '',
-            '{center}{grey-fg}Ctrl+W to toggle split view{/grey-fg}{/center}',
+            ' '.repeat(W),
+            _centerLine('{bold}{green-fg}whtui{/green-fg}{/bold}', W),
+            ' '.repeat(W),
+            _centerLine(`{grey-fg}${n} chat${n === 1 ? '' : 's'} loaded{/grey-fg}`, W),
+            ' '.repeat(W),
+            _centerLine('j/k navigate  ·  Enter open  ·  / search  ·  Space preview  ·  ? help', W),
+            ' '.repeat(W),
+            _centerLine('{grey-fg}Ctrl+W to toggle split view{/grey-fg}', W),
         ].join('\n'));
         return;
     }
 
     // ── Normal message rendering ─────────────────────────────────────────────
-    const msgs    = state.messages.slice(-MAX_MESSAGES);
-    const newSig  = _getMessageSig(msgs);
-    const changed = newSig !== _msgSig;
-    _msgSig       = newSig;
+    const rawMsgs = state.messages.slice(-MAX_MESSAGES);
+    const msgs = rawMsgs.filter(m => m.text || m.media || (m.reactions && m.reactions.length > 0) || m.quoted);
 
-    if (msgs.length === 0) {
-        msgPanel.setContent(
-            '\n{center}{grey-fg}No messages loaded yet.  Press r to refresh.{/grey-fg}{/center}'
-        );
-        return;
-    }
+    const innerW = getMsgPanelInnerWidth();
 
-    const lines = [];
+    // Rebuild full line list only when messages change
+    const newSig = `${msgs.length}:${msgs[msgs.length - 1]?.id}`;
+    if (newSig !== _allLines._sig) {
+        const built = [];
 
-    if (state.compactMessages) {
-        // ── Compact mode: one line per message ──────────────────────────────
-        let prevTs = null;
-        for (const msg of msgs) {
-            if (!sameDay(prevTs, msg.timestamp)) {
-                const sep = dateSeparator(msg.timestamp);
-                lines.push('');
-                lines.push(`{center}{grey-fg}──── ${sep} ────{/grey-fg}{/center}`);
-                lines.push('');
+        if (msgs.length === 0) {
+            built.push(_centerLine('{grey-fg}No messages loaded yet.  Press r to refresh.{/grey-fg}', innerW));
+        } else if (state.compactMessages) {
+            let prevTs = null;
+            for (const msg of msgs) {
+                if (!sameDay(prevTs, msg.timestamp)) {
+                    const sep = dateSeparator(msg.timestamp);
+                    built.push(_padLine('', innerW));
+                    built.push(_centerLine(`{grey-fg}──── ${sep} ────{/grey-fg}`, innerW));
+                    built.push(_padLine('', innerW));
+                }
+                prevTs = msg.timestamp;
+                const cl = formatMessageCompact(msg);
+                if (cl) built.push(cl);
             }
-            prevTs = msg.timestamp;
-            lines.push(formatMessageCompact(msg));
+        } else {
+            let prevTs = null;
+            let i = 0;
+            while (i < msgs.length) {
+                const msg = msgs[i];
+                if (!sameDay(prevTs, msg.timestamp)) {
+                    const sep = dateSeparator(msg.timestamp);
+                    built.push(_padLine('', innerW));
+                    built.push(_centerLine(`{grey-fg}──── ${sep} ────{/grey-fg}`, innerW));
+                    built.push(_padLine('', innerW));
+                }
+                const senderKey = msg.outgoing ? '__me__' : (msg.sender || 'contact');
+                const run = [msg];
+                let j = i + 1;
+                while (j < msgs.length) {
+                    const next = msgs[j];
+                    if (!sameDay(prevTs, next.timestamp) && !sameDay(msg.timestamp, next.timestamp)) break;
+                    const nextKey = next.outgoing ? '__me__' : (next.sender || 'contact');
+                    if (nextKey !== senderKey) break;
+                    run.push(next);
+                    j++;
+                }
+                built.push(...formatGroupedMessages(run, innerW));
+                prevTs = run[run.length - 1].timestamp;
+                i = j;
+            }
         }
-    } else {
-        // ── Grouped sender mode (default) ────────────────────────────────────
-        // Group consecutive messages by sender, intersperse date separators
-        let prevTs     = null;
-        let i          = 0;
 
-        while (i < msgs.length) {
-            const msg = msgs[i];
-
-            // Date separator
-            if (!sameDay(prevTs, msg.timestamp)) {
-                const sep = dateSeparator(msg.timestamp);
-                lines.push('');
-                lines.push(`{center}{grey-fg}──── ${sep} ────{/grey-fg}{/center}`);
-                lines.push('');
-            }
-
-            // Collect run of same-sender messages
-            const senderKey = msg.outgoing ? '__me__' : (msg.sender || 'contact');
-            const run = [msg];
-            let j = i + 1;
-            while (j < msgs.length) {
-                const next = msgs[j];
-                if (!sameDay(prevTs, next.timestamp) && !sameDay(msg.timestamp, next.timestamp)) break;
-                const nextKey = next.outgoing ? '__me__' : (next.sender || 'contact');
-                if (nextKey !== senderKey) break;
-                run.push(next);
-                j++;
-            }
-
-            // Render the run as a group
-            const groupLines = formatGroupedMessages(run);
-            lines.push(...groupLines);
-            prevTs = run[run.length - 1].timestamp;
-            i = j;
-        }
+        // Pad every line to panel width — every terminal cell gets written, no ghosts possible
+        _allLines = built.map(l => _padLine(l, innerW));
+        _allLines._sig = newSig;
+        state.msgScrollOffset = 0;  // new messages → snap to bottom
     }
 
-    lines.push('');  // trailing breathing room
+    // ── Viewport slicing ─────────────────────────────────────────────────────
+    // Visible rows = panel height minus 2 border rows
+    const viewH = Math.max(1, msgPanel.height - 2);
+    const total = _allLines.length;
 
-    msgPanel.setContent(lines.join('\n'));
+    // clamp scroll offset so we can't scroll past the top
+    state.msgScrollOffset = Math.max(0, Math.min(state.msgScrollOffset, Math.max(0, total - viewH)));
 
-    if (changed) {
-        msgPanel.setScrollPerc(100);
-    }
+    const startIdx = Math.max(0, total - viewH - state.msgScrollOffset);
+    const slice    = _allLines.slice(startIdx, startIdx + viewH);
+
+    // Pad top with blank lines so the panel is always completely full
+    const blank = ' '.repeat(innerW);
+    while (slice.length < viewH) slice.unshift(blank);
+
+    msgPanel.setContent(slice.join('\n'));
 }
+
 
 // ── Preview popup ─────────────────────────────────────────────────────────────
 
@@ -362,8 +396,11 @@ function renderPreview() {
 
     // If this is the currently open chat, show actual messages
     if (chat.id === state.currentChatId && state.messages.length > 0) {
-        const preview = state.messages.slice(-8);
-        const previewLines = formatGroupedMessages(preview);
+        const preview = state.messages
+            .filter(m => m.text || m.media || (m.reactions && m.reactions.length > 0) || m.quoted)
+            .slice(-8);
+        const previewW = Math.max(20, Math.floor(screen.width * 0.66) - 4);
+        const previewLines = formatGroupedMessages(preview, previewW);
         lines.push(...previewLines);
     } else if (chat.lastMessage) {
         lines.push(`{grey-fg}Last message:{/grey-fg}`);
@@ -373,7 +410,7 @@ function renderPreview() {
     }
 
     lines.push('');
-    lines.push('{center}{grey-fg}Space/Esc dismiss  ·  Enter open{/grey-fg}{/center}');
+    lines.push('{grey-fg}Space/Esc dismiss  ·  Enter open{/grey-fg}');
 
     previewBox.setContent(lines.join('\n'));
     previewBox.show();
@@ -547,8 +584,11 @@ function render(spinnerFrame) {
 
 screen.on('resize', () => {
     // Force complete redraw on resize
+    screen.clearRegion(0, screen.width, 0, screen.height);
     render();
 });
+
+
 
 module.exports = {
     render,
